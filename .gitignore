@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+firebase-service-account.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Uploads
+uploads/
+
+# Coverage
+coverage/
+
+# Docker volumes (if local)
+data/
+
+# Local Specs & Old Prototype
+Fleetr-main/
+plan.pdf
+plan.txt
+*.zip

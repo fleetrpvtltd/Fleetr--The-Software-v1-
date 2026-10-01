@@ -1,0 +1,28 @@
+{
+  "name": "fleetr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fleetr — B2B/B2C Freight Management Platform",
+  "workspaces": [
+    "backend",
+    "fleetr",
+    "admin-panel"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:fleetr\" \"npm run dev:admin-panel\"",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:fleetr": "npm run dev --workspace=fleetr",
+    "dev:admin-panel": "npm run dev --workspace=admin-panel",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspace=backend",
+    "seed:admin": "npm run seed:admin --workspace=backend",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
