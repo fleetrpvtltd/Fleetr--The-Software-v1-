@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+.git/
+.env
+.env.*
+Fleetr-main/
+plan.pdf
+plan.txt
+*.log
+.DS_Store
+.agents/
+ORIGINAL_REQUEST.md

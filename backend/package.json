@@ -2,11 +2,11 @@
   "name": "@fleetr/backend",
   "version": "1.0.0",
   "description": "Fleetr Backend",
-  "main": "dist/server.js",
+  "main": "dist/src/server.js",
   "scripts": {
     "dev": "nodemon --exec tsx src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "seed:admin": "tsx scripts/seed-admin.ts"

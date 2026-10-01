@@ -48,6 +48,29 @@ app.get('/health', (req, res) => {
   });
 });
 
+import path from 'path';
+import fs from 'fs';
+
+const adminDistPath = path.resolve(process.cwd(), 'admin-panel/dist');
+const fleetrDistPath = path.resolve(process.cwd(), 'fleetr/dist');
+
+if (fs.existsSync(adminDistPath)) {
+  app.use('/admin', express.static(adminDistPath));
+  app.get('/admin*', (req, res) => {
+    res.sendFile(path.join(adminDistPath, 'index.html'));
+  });
+}
+
+if (fs.existsSync(fleetrDistPath)) {
+  app.use(express.static(fleetrDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io') || req.path.startsWith('/health')) {
+      return next();
+    }
+    res.sendFile(path.join(fleetrDistPath, 'index.html'));
+  });
+}
+
 app.use(notFoundHandler);
 app.use(errorHandler);
 

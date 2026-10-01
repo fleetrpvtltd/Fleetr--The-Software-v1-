@@ -40,3 +40,7 @@ Fleetr-main/
 plan.pdf
 plan.txt
 *.zip
+
+# Agent Scratch Files
+.agents/
+ORIGINAL_REQUEST.md
