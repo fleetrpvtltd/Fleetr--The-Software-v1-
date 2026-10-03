@@ -1,0 +1,6 @@
+{
+  "name": "Gati-Node Logistics",
+  "description": "Logistics Management Platform for Indian freight, truck, godown, compliance, tracking, and admin delivery assignment.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
