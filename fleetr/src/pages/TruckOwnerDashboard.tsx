@@ -126,11 +126,6 @@ export const TruckOwnerDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchData(true);
-    // Silent real-time synchronization polling every 10 seconds
-    const timer = setInterval(() => {
-      fetchData(false);
-    }, 10000);
-    return () => clearInterval(timer);
   }, []);
 
   const handleRegisterVehicle = async (e: React.FormEvent) => {

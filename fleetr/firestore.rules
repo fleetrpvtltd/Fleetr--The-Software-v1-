@@ -30,19 +30,33 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // Invoices are immutable financial documents: cannot be deleted
     match /invoices/{invoiceId} {
-      allow read, write: if isSignedIn();
+      allow read, create, update: if isSignedIn();
+      allow delete: if false;
     }
 
     match /notifications/{notificationId} {
       allow read, write: if isSignedIn();
     }
 
+    // Audit logs are append-only: cannot be modified or deleted
     match /auditLogs/{logId} {
-      allow read, write: if isSignedIn();
+      allow read, create: if isSignedIn();
+      allow update, delete: if false;
     }
 
     match /assignments/{assignmentId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Customer support & dispute management
+    match /supportTickets/{ticketId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Pre-computed aggregation metrics documents
+    match /stats/{statId} {
       allow read, write: if isSignedIn();
     }
 
@@ -51,4 +65,3 @@ service cloud.firestore {
     }
   }
 }
-

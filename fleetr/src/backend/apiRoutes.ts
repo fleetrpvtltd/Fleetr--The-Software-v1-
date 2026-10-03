@@ -21,7 +21,7 @@ import {
 } from './aiServices';
 import { calculateRealTariffAndRoute, findHub, LOGISTICS_HUBS } from './routingEngine';
 import { executeRealtimeRoutingAnalysis, enrichVehicleTelemetry } from './geospatialService';
-import { User, Vehicle, Driver, Godown, Delivery, Payment, Invoice, Notification, AuditLog, Assignment } from '../types';
+import { User, Vehicle, Driver, Godown, Delivery, Payment, Invoice, Notification, AuditLog, Assignment, SupportTicket, DashboardStats } from '../types';
 
 export const apiRouter = Router();
 
@@ -890,47 +890,32 @@ apiRouter.get('/assignments/recommendations/:deliveryId', checkRole(['ADMIN']), 
 
 apiRouter.post('/assignments/:deliveryId/assign-truck', checkRole(['ADMIN']), async (req: Request, res: Response) => {
   const { vehicleId, driverId } = req.body;
-  const del = await dbService.getDelivery(req.params.deliveryId);
-  if (!del) return res.status(404).json({ error: 'NOT_FOUND' });
+  if (!vehicleId || !driverId) {
+    return res.status(400).json({ error: 'vehicleId and driverId are required.' });
+  }
 
-  await dbService.updateDelivery(del.id, {
-    assignedVehicleId: vehicleId,
-    assignedDriverId: driverId,
-    status: 'TRUCK_ASSIGNED'
-  });
-  del.assignedVehicleId = vehicleId;
-  del.assignedDriverId = driverId;
-  del.status = 'TRUCK_ASSIGNED';
-
-  const newAss: Assignment = {
-    id: `ass_${Date.now()}`,
-    deliveryId: del.id,
-    vehicleId,
-    driverId,
-    aiRecommended: true,
-    assignedAt: new Date().toISOString()
-  };
-  await dbService.createAssignment(newAss);
-
-  await logAction(req, 'TRUCK_ASSIGN', `Assigned vehicle ${vehicleId} / driver ${driverId} to freight trip ${del.id}`);
-  res.json({ success: true, delivery: del });
+  try {
+    const result = await dbService.assignDeliveryTruckTx(req.params.deliveryId, vehicleId, driverId);
+    await logAction(req, 'TRUCK_ASSIGN', `Assigned vehicle ${vehicleId} / driver ${driverId} to freight trip ${req.params.deliveryId}`);
+    res.json({ success: true, delivery: result.delivery, assignment: result.assignment });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Truck assignment transaction failed.' });
+  }
 });
 
 apiRouter.post('/assignments/:deliveryId/assign-godown', checkRole(['ADMIN']), async (req: Request, res: Response) => {
   const { godownId } = req.body;
-  const del = await dbService.getDelivery(req.params.deliveryId);
-  if (!del) return res.status(404).json({ error: 'NOT_FOUND' });
+  if (!godownId) {
+    return res.status(400).json({ error: 'godownId is required.' });
+  }
 
-  const nextStatus = del.status === 'TRUCK_ASSIGNED' ? 'GODOWN_ASSIGNED' : del.status;
-  await dbService.updateDelivery(del.id, {
-    intermediateGodownId: godownId,
-    status: nextStatus
-  });
-  del.intermediateGodownId = godownId;
-  del.status = nextStatus;
-
-  await logAction(req, 'GODOWN_ASSIGN', `Routed freight trip ${del.id} via staging point ${godownId}`);
-  res.json({ success: true, delivery: del });
+  try {
+    const result = await dbService.assignGodownCapacityTx(req.params.deliveryId, godownId);
+    await logAction(req, 'GODOWN_ASSIGN', `Routed freight trip ${req.params.deliveryId} via staging point ${godownId}`);
+    res.json({ success: true, delivery: result.delivery, godown: result.godown });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Warehouse capacity assignment transaction failed.' });
+  }
 });
 
 apiRouter.post('/assignments/:deliveryId/override-ai', checkRole(['ADMIN']), async (req: Request, res: Response) => {
@@ -1307,4 +1292,71 @@ apiRouter.post('/whatsapp/send', async (req: Request, res: Response) => {
       message: err.message || 'Failed to request outbound WhatsApp gateway.'
     });
   }
+});
+
+// ---------------- FREE-TIER OPTIMIZED AGGREGATE STATS ----------------
+apiRouter.get('/stats/dashboard', async (req: Request, res: Response) => {
+  try {
+    const stats = await dbService.getDashboardStats();
+    res.json(stats);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to retrieve metrics' });
+  }
+});
+
+// ---------------- CUSTOMER SERVICE & SUPPORT TICKETS ----------------
+apiRouter.post('/support/tickets', async (req: Request, res: Response) => {
+  const user = await getCurrentUser(req);
+  if (!user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+
+  const { deliveryId, category, priority, subject, description } = req.body;
+  if (!subject || !description) {
+    return res.status(400).json({ error: 'Subject and description are required.' });
+  }
+
+  const ticket: SupportTicket = {
+    id: `tkt_${Date.now()}`,
+    deliveryId: deliveryId || undefined,
+    raisedBy: user.id,
+    raisedByName: user.name,
+    raisedByEmail: user.email,
+    raisedByRole: user.role,
+    category: category || 'GENERAL_DISPUTE',
+    priority: priority || 'MEDIUM',
+    subject,
+    description,
+    status: 'OPEN',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  await dbService.createSupportTicket(ticket);
+  await logAction(req, 'SUPPORT_TICKET_RAISE', `Support ticket ${ticket.id} (${ticket.category}) opened by ${user.name}`);
+  res.json({ success: true, ticket });
+});
+
+apiRouter.get('/support/tickets', async (req: Request, res: Response) => {
+  const user = await getCurrentUser(req);
+  if (!user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+
+  const filter = user.role === 'ADMIN' ? undefined : { raisedBy: user.id };
+  const tickets = await dbService.getSupportTickets(filter);
+  res.json({ tickets });
+});
+
+apiRouter.patch('/support/tickets/:id', async (req: Request, res: Response) => {
+  const user = await getCurrentUser(req);
+  if (!user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+
+  const { status, adminNotes } = req.body;
+  const updates: Partial<SupportTicket> = {};
+  if (status) updates.status = status;
+  if (adminNotes !== undefined) updates.adminNotes = adminNotes;
+  if (status === 'RESOLVED' || status === 'CLOSED') {
+    updates.resolvedAt = new Date().toISOString();
+  }
+
+  await dbService.updateSupportTicket(req.params.id, updates);
+  await logAction(req, 'SUPPORT_TICKET_UPDATE', `Ticket ${req.params.id} updated by ${user.name} to status ${status}`);
+  res.json({ success: true });
 });

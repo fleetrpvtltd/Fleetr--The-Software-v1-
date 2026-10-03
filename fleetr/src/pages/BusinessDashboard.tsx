@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { apiRequest } from '../utils/api';
-import { Delivery, Payment, Invoice } from '../types';
+import { Delivery, Payment, Invoice, SupportTicket } from '../types';
 import {
   PlusCircle,
   FileText,
@@ -19,7 +19,11 @@ import {
   RotateCcw,
   CheckCircle2,
   DollarSign,
-  Compass
+  Compass,
+  LifeBuoy,
+  Send,
+  MessageSquare,
+  Clock
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { MetricCardsSkeleton, TableSkeleton, ListCardSkeleton, ChartSkeleton } from '../components/Skeleton';
@@ -28,7 +32,16 @@ export const BusinessDashboard: React.FC = () => {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Support ticket form states
+  const [ticketSubject, setTicketSubject] = useState('');
+  const [ticketDesc, setTicketDesc] = useState('');
+  const [ticketCategory, setTicketCategory] = useState<SupportTicket['category']>('SHIPMENT_DELAY');
+  const [ticketPriority, setTicketPriority] = useState<SupportTicket['priority']>('MEDIUM');
+  const [ticketDeliveryId, setTicketDeliveryId] = useState('');
+  const [submittingTicket, setSubmittingTicket] = useState(false);
 
   // Form states
   const [goodsDescription, setGoodsDescription] = useState('');
@@ -46,19 +59,27 @@ export const BusinessDashboard: React.FC = () => {
   const [consigneeGstin, setConsigneeGstin] = useState('');
   
   // Modal / Selection state
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CREATE' | 'TRACKING'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'CREATE' | 'TRACKING' | 'SUPPORT'>('OVERVIEW');
   const [selectedDel, setSelectedDel] = useState<any | null>(null);
   const [payDisclaimerAccepted, setPayDisclaimerAccepted] = useState(false);
   const [delCursor, setDelCursor] = useState<string | null>(null);
   const [hasMoreDel, setHasMoreDel] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<number>(0);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   const fetchData = async (isInitial = false) => {
+    // Cooldown check for manual sync to save free-tier quota (10s)
+    const now = Date.now();
+    if (!isInitial && now - lastSyncTime < 10000) {
+      return;
+    }
+    setLastSyncTime(now);
+
     try {
       if (isInitial) setLoading(true);
-      const delData = await apiRequest('/deliveries?limit=10');
+      const delData = await apiRequest('/deliveries?limit=15');
       setDeliveries(delData.deliveries || []);
       setDelCursor(delData.nextCursor || null);
       setHasMoreDel(Boolean(delData.hasMore));
@@ -66,17 +87,8 @@ export const BusinessDashboard: React.FC = () => {
       const payData = await apiRequest('/payments');
       setPayments(payData.payments || []);
 
-      // Gather invoices
-      const invPromises = (delData.deliveries || []).map(async (d: Delivery) => {
-        try {
-          const detail = await apiRequest(`/deliveries/${d.id}`);
-          return detail.invoice;
-        } catch {
-          return null;
-        }
-      });
-      const invs = (await Promise.all(invPromises)).filter(Boolean);
-      setInvoices(invs);
+      const invData = await apiRequest('/invoices').catch(() => ({ invoices: [] }));
+      setInvoices(invData.invoices || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -84,11 +96,50 @@ export const BusinessDashboard: React.FC = () => {
     }
   };
 
+  const fetchTickets = async () => {
+    try {
+      const res = await apiRequest('/support/tickets');
+      setTickets(res.tickets || []);
+    } catch (err) {
+      console.error('Failed to load support tickets:', err);
+    }
+  };
+
+  const handleCreateTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticketSubject.trim() || !ticketDesc.trim()) {
+      setErrorMsg('Please specify subject and details for this inquiry.');
+      return;
+    }
+
+    try {
+      setSubmittingTicket(true);
+      setErrorMsg('');
+      const res = await apiRequest('/support/tickets', 'POST', {
+        deliveryId: ticketDeliveryId || undefined,
+        category: ticketCategory,
+        priority: ticketPriority,
+        subject: ticketSubject.trim(),
+        description: ticketDesc.trim()
+      });
+
+      setSuccessMsg(`Support ticket ${res.ticket?.id || ''} raised successfully. Administrator desk notified.`);
+      setTicketSubject('');
+      setTicketDesc('');
+      setTicketDeliveryId('');
+      fetchTickets();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to submit support ticket.');
+    } finally {
+      setSubmittingTicket(false);
+    }
+  };
+
   const handleLoadMore = async () => {
     if (!delCursor || loadingMore) return;
     try {
       setLoadingMore(true);
-      const moreData = await apiRequest(`/deliveries?limit=10&startAfter=${encodeURIComponent(delCursor)}`);
+      const moreData = await apiRequest(`/deliveries?limit=15&startAfter=${encodeURIComponent(delCursor)}`);
       if (moreData.deliveries && moreData.deliveries.length > 0) {
         setDeliveries((prev) => [...prev, ...moreData.deliveries]);
         setDelCursor(moreData.nextCursor || null);
@@ -105,11 +156,7 @@ export const BusinessDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchData(true);
-    // Silent real-time synchronization polling every 10 seconds
-    const timer = setInterval(() => {
-      fetchData(false);
-    }, 10000);
-    return () => clearInterval(timer);
+    fetchTickets();
   }, []);
 
   const handleCreateDelivery = async (e: React.FormEvent) => {
@@ -249,6 +296,18 @@ export const BusinessDashboard: React.FC = () => {
             Tracking: {selectedDel.delivery.id}
           </button>
         )}
+        <button
+          onClick={() => { setActiveTab('SUPPORT'); setSelectedDel(null); }}
+          className={`px-3.5 sm:px-4 py-2 min-h-[40px] text-xs font-mono font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 justify-center ${activeTab === 'SUPPORT' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+        >
+          <LifeBuoy className="w-3.5 h-3.5 text-blue-600" />
+          <span>Support & Dispute Desk</span>
+          {tickets.filter(t => t.status === 'OPEN' || t.status === 'IN_REVIEW').length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-amber-500 text-white font-bold font-mono">
+              {tickets.filter(t => t.status === 'OPEN' || t.status === 'IN_REVIEW').length}
+            </span>
+          )}
+        </button>
       </div>
 
       {successMsg && (
@@ -773,6 +832,206 @@ export const BusinessDashboard: React.FC = () => {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* SUPPORT & DISPUTE DESK MODULE */}
+      {activeTab === 'SUPPORT' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-800 font-display">Customer Support & Dispute Desk</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Report damaged cargo, delay penalties, route discrepancies, or tariff disputes directly to Master Admin.
+              </p>
+            </div>
+            <button
+              onClick={fetchTickets}
+              className="text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all self-start sm:self-auto cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Refresh Tickets
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Ticket Submission Form */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display flex items-center gap-2">
+                <Send className="w-3.5 h-3.5 text-blue-600" />
+                <span>Open New Dispute / Ticket</span>
+              </h3>
+              <form onSubmit={handleCreateTicket} className="space-y-3.5">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Issue Category *</label>
+                  <select
+                    value={ticketCategory}
+                    onChange={(e) => setTicketCategory(e.target.value as any)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="SHIPMENT_DELAY">Shipment Delay & Transit Halt</option>
+                    <option value="CARGO_DAMAGE">Cargo Damage / Loss in Transit</option>
+                    <option value="PAYMENT_ISSUE">Payment / Tariff Invoicing Dispute</option>
+                    <option value="TRUCK_BREAKDOWN">Carrier / Vehicle Breakdown</option>
+                    <option value="GENERAL_DISPUTE">General Service Inquiry</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Linked Consignment (Optional)</label>
+                  <select
+                    value={ticketDeliveryId}
+                    onChange={(e) => setTicketDeliveryId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                  >
+                    <option value="">-- No specific consignment --</option>
+                    {deliveries.map((del) => (
+                      <option key={del.id} value={del.id}>
+                        {del.id} - {del.goodsDescription.substring(0, 28)} ({del.status})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Urgency Priority *</label>
+                  <select
+                    value={ticketPriority}
+                    onChange={(e) => setTicketPriority(e.target.value as any)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="LOW">Low - General inquiry</option>
+                    <option value="MEDIUM">Medium - Operational issue</option>
+                    <option value="HIGH">High - Urgent consignment intervention</option>
+                    <option value="CRITICAL">Critical - Immediate cargo loss / legal</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Subject Title *</label>
+                  <input
+                    type="text"
+                    value={ticketSubject}
+                    onChange={(e) => setTicketSubject(e.target.value)}
+                    placeholder="e.g. Carrier delayed in Jaipur transit hub"
+                    required
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Incident Details *</label>
+                  <textarea
+                    rows={4}
+                    value={ticketDesc}
+                    onChange={(e) => setTicketDesc(e.target.value)}
+                    placeholder="Provide specific consignment details, expected delivery time, driver contact if known, and the nature of the dispute..."
+                    required
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submittingTicket}
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer shadow-xs active:scale-98 flex items-center justify-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{submittingTicket ? 'Transmitting Ticket...' : 'File Support Ticket'}</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Active Tickets Roster */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display flex items-center gap-2">
+                  <MessageSquare className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Your Support & Dispute Tickets ({tickets.length})</span>
+                </h3>
+              </div>
+
+              {tickets.length === 0 ? (
+                <div className="text-center py-16 text-slate-400 space-y-2">
+                  <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400" />
+                  <p className="text-xs font-medium">No open disputes or support tickets on record.</p>
+                  <p className="text-[11px] text-slate-400">All consignments and freight settlements are operating smoothly.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[580px] overflow-y-auto pr-1">
+                  {tickets.map((tkt) => (
+                    <div
+                      key={tkt.id}
+                      className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 hover:bg-white transition-all space-y-3 shadow-2xs"
+                    >
+                      <div className="flex flex-wrap justify-between items-start gap-2">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
+                              {tkt.id}
+                            </span>
+                            {tkt.deliveryId && (
+                              <span className="font-mono text-[10px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">
+                                Consignment: {tkt.deliveryId}
+                              </span>
+                            )}
+                            <span
+                              className={`text-[9px] font-bold uppercase font-mono px-2 py-0.5 rounded ${
+                                tkt.priority === 'CRITICAL'
+                                  ? 'bg-rose-100 text-rose-700 border border-rose-300'
+                                  : tkt.priority === 'HIGH'
+                                  ? 'bg-amber-100 text-amber-700 border border-amber-300'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {tkt.priority} Priority
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-slate-900">{tkt.subject}</h4>
+                        </div>
+                        <span
+                          className={`text-[10px] font-bold uppercase font-mono px-2.5 py-1 rounded-full ${
+                            tkt.status === 'RESOLVED'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : tkt.status === 'IN_REVIEW'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : tkt.status === 'CLOSED'
+                              ? 'bg-slate-200 text-slate-700'
+                              : 'bg-blue-100 text-blue-800 border border-blue-300'
+                          }`}
+                        >
+                          {tkt.status.replace('_', ' ')}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-600 bg-white p-3 rounded-lg border border-slate-100 leading-relaxed">
+                        {tkt.description}
+                      </p>
+
+                      {tkt.adminNotes && (
+                        <div className="bg-emerald-50/80 border border-emerald-200 rounded-lg p-3 space-y-1">
+                          <div className="flex items-center gap-1.5 text-emerald-800 text-[11px] font-bold font-display">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Administrator Response & Resolution Notes:</span>
+                          </div>
+                          <p className="text-xs text-emerald-900 leading-relaxed pl-5">{tkt.adminNotes}</p>
+                          {tkt.resolvedAt && (
+                            <span className="text-[10px] font-mono text-emerald-700 pl-5 block">
+                              Resolved at: {new Date(tkt.resolvedAt).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-100">
+                        <span>Category: {tkt.category.replace('_', ' ')}</span>
+                        <span>Filed: {new Date(tkt.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

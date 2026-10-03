@@ -17,7 +17,9 @@ import {
   orderBy,
   startAfter,
   documentId,
-  QueryConstraint
+  QueryConstraint,
+  runTransaction,
+  writeBatch
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { db, auth, sanitizeForFirestore } from '../lib/firebase';
@@ -31,7 +33,9 @@ import {
   Payment,
   Invoice,
   Notification,
-  AuditLog
+  AuditLog,
+  SupportTicket,
+  DashboardStats
 } from '../types';
 
 export interface VehicleFilterOptions {
@@ -787,6 +791,262 @@ export class DbService {
   async createAuditLog(auditLog: AuditLog): Promise<AuditLog> {
     await setDoc(doc(db, 'auditLogs', auditLog.id), sanitizeForFirestore(auditLog));
     return auditLog;
+  }
+
+  // ---------------- FREE-TIER OPTIMIZED ATOMIC TRANSACTIONS ----------------
+  async assignDeliveryTruckTx(
+    deliveryId: string,
+    vehicleId: string,
+    driverId: string
+  ): Promise<{ delivery: Delivery; assignment: Assignment }> {
+    return await runTransaction(db, async (transaction) => {
+      const delRef = doc(db, 'deliveries', deliveryId);
+      const vehRef = doc(db, 'vehicles', vehicleId);
+      const drvRef = doc(db, 'drivers', driverId);
+
+      const delSnap = await transaction.get(delRef);
+      if (!delSnap.exists()) {
+        throw new Error(`Consignment ${deliveryId} was not found.`);
+      }
+      const delivery = delSnap.data() as Delivery;
+
+      if (delivery.assignedVehicleId && delivery.assignedVehicleId !== vehicleId) {
+        throw new Error(`Consignment ${deliveryId} is already allocated to vehicle ${delivery.assignedVehicleId}.`);
+      }
+
+      const vehSnap = await transaction.get(vehRef);
+      if (!vehSnap.exists()) {
+        throw new Error(`Vehicle ${vehicleId} not registered in fleet.`);
+      }
+      const vehicle = vehSnap.data() as Vehicle;
+
+      if (vehicle.isAvailable === false && vehicle.status === 'IN_TRANSIT') {
+        throw new Error(`Vehicle ${vehicle.vehicleNumber} is currently in transit and cannot be double-booked.`);
+      }
+
+      const drvSnap = await transaction.get(drvRef);
+      if (!drvSnap.exists()) {
+        throw new Error(`Driver ${driverId} not registered.`);
+      }
+      const driver = drvSnap.data() as Driver;
+
+      const assignment: Assignment = {
+        id: `ass_${Date.now()}`,
+        deliveryId,
+        vehicleId,
+        driverId,
+        aiRecommended: false,
+        assignedAt: new Date().toISOString(),
+        status: 'ACTIVE'
+      };
+
+      const updatedDelivery: Partial<Delivery> = {
+        status: 'TRUCK_ASSIGNED',
+        assignedVehicleId: vehicleId,
+        assignedDriverId: driverId
+      };
+
+      const updatedVehicle: Partial<Vehicle> = {
+        isAvailable: false,
+        status: 'IN_TRANSIT'
+      };
+
+      const assRef = doc(db, 'assignments', assignment.id);
+      transaction.set(assRef, sanitizeForFirestore(assignment));
+      transaction.update(delRef, sanitizeForFirestore(updatedDelivery));
+      transaction.update(vehRef, sanitizeForFirestore(updatedVehicle));
+
+      return {
+        delivery: { ...delivery, ...updatedDelivery },
+        assignment
+      };
+    });
+  }
+
+  async assignGodownCapacityTx(
+    deliveryId: string,
+    godownId: string
+  ): Promise<{ delivery: Delivery; godown: Godown }> {
+    return await runTransaction(db, async (transaction) => {
+      const delRef = doc(db, 'deliveries', deliveryId);
+      const gdnRef = doc(db, 'godowns', godownId);
+
+      const delSnap = await transaction.get(delRef);
+      if (!delSnap.exists()) {
+        throw new Error(`Consignment ${deliveryId} not found.`);
+      }
+      const delivery = delSnap.data() as Delivery;
+
+      const gdnSnap = await transaction.get(gdnRef);
+      if (!gdnSnap.exists()) {
+        throw new Error(`Warehouse facility ${godownId} not found.`);
+      }
+      const godown = gdnSnap.data() as Godown;
+
+      const requiredKg = delivery.goodsWeightKg || 0;
+      if (godown.availableCapacityKg < requiredKg) {
+        throw new Error(
+          `Insufficient warehouse space: ${godown.name} has only ${godown.availableCapacityKg}kg capacity available, but consignment requires ${requiredKg}kg.`
+        );
+      }
+
+      const newAvailableKg = godown.availableCapacityKg - requiredKg;
+      const updatedGodown: Partial<Godown> = {
+        availableCapacityKg: newAvailableKg
+      };
+
+      const updatedDelivery: Partial<Delivery> = {
+        status: 'GODOWN_ASSIGNED',
+        intermediateGodownId: godownId
+      };
+
+      transaction.update(gdnRef, sanitizeForFirestore(updatedGodown));
+      transaction.update(delRef, sanitizeForFirestore(updatedDelivery));
+
+      return {
+        delivery: { ...delivery, ...updatedDelivery },
+        godown: { ...godown, ...updatedGodown }
+      };
+    });
+  }
+
+  async completeDeliveryTx(deliveryId: string): Promise<Delivery> {
+    return await runTransaction(db, async (transaction) => {
+      const delRef = doc(db, 'deliveries', deliveryId);
+      const delSnap = await transaction.get(delRef);
+      if (!delSnap.exists()) {
+        throw new Error(`Consignment ${deliveryId} not found.`);
+      }
+      const delivery = delSnap.data() as Delivery;
+
+      if (delivery.assignedVehicleId) {
+        const vehRef = doc(db, 'vehicles', delivery.assignedVehicleId);
+        const vehSnap = await transaction.get(vehRef);
+        if (vehSnap.exists()) {
+          transaction.update(vehRef, { isAvailable: true, status: 'IDLE' });
+        }
+      }
+
+      if (delivery.intermediateGodownId && delivery.goodsWeightKg) {
+        const gdnRef = doc(db, 'godowns', delivery.intermediateGodownId);
+        const gdnSnap = await transaction.get(gdnRef);
+        if (gdnSnap.exists()) {
+          const gdn = gdnSnap.data() as Godown;
+          const restoredKg = Math.min(gdn.totalCapacityKg, gdn.availableCapacityKg + delivery.goodsWeightKg);
+          transaction.update(gdnRef, { availableCapacityKg: restoredKg });
+        }
+      }
+
+      const updatedDelivery: Partial<Delivery> = {
+        status: 'DELIVERED',
+        deliveredAt: new Date().toISOString()
+      };
+
+      transaction.update(delRef, sanitizeForFirestore(updatedDelivery));
+      return { ...delivery, ...updatedDelivery };
+    });
+  }
+
+  // ---------------- FREE-TIER IN-MEMORY STATS CACHE (60s TTL) ----------------
+  private statsCache: { data: DashboardStats; expiresAt: number } | null = null;
+
+  async getDashboardStats(forceFresh = false): Promise<DashboardStats> {
+    const now = Date.now();
+    if (!forceFresh && this.statsCache && this.statsCache.expiresAt > now) {
+      return this.statsCache.data;
+    }
+
+    try {
+      // Check pre-computed summary doc first (cost: 1 read)
+      const statDocRef = doc(db, 'stats', 'global_metrics');
+      const statSnap = await getDoc(statDocRef);
+      if (statSnap.exists()) {
+        const data = statSnap.data() as DashboardStats;
+        this.statsCache = { data, expiresAt: now + 60000 };
+        return data;
+      }
+    } catch {
+      // fallback to live aggregation
+    }
+
+    // Compute and cache live stats
+    const [delSnap, vehSnap, gdnSnap, tktSnap] = await Promise.all([
+      getDocs(collection(db, 'deliveries')),
+      getDocs(collection(db, 'vehicles')),
+      getDocs(collection(db, 'godowns')),
+      getDocs(collection(db, 'supportTickets')).catch(() => ({ docs: [] } as any))
+    ]);
+
+    const deliveries = delSnap.docs.map((d) => d.data() as Delivery);
+    const vehicles = vehSnap.docs.map((d) => d.data() as Vehicle);
+    const godowns = gdnSnap.docs.map((d) => d.data() as Godown);
+    const tickets = tktSnap.docs.map((d) => d.data() as SupportTicket);
+
+    const totalDeliveries = deliveries.length;
+    const activeDeliveries = deliveries.filter(
+      (d) => d.status !== 'DELIVERED' && d.status !== 'CANCELLED' && d.status !== 'FAILED'
+    ).length;
+    const completedDeliveries = deliveries.filter((d) => d.status === 'DELIVERED').length;
+    const totalFreightRevenue = deliveries.reduce((acc, d) => acc + (d.goodsValueInr ? d.goodsValueInr * 0.05 : 0), 0);
+    const totalFleetVehicles = vehicles.length;
+    const availableVehicles = vehicles.filter((v) => v.isAvailable !== false).length;
+    const totalGodowns = godowns.length;
+    const openSupportTickets = tickets.filter((t) => t.status === 'OPEN' || t.status === 'IN_REVIEW').length;
+
+    const stats: DashboardStats = {
+      totalDeliveries,
+      activeDeliveries,
+      completedDeliveries,
+      totalFreightRevenue: Math.round(totalFreightRevenue),
+      totalFleetVehicles,
+      availableVehicles,
+      totalGodowns,
+      openSupportTickets,
+      lastCalculatedAt: new Date().toISOString()
+    };
+
+    // Store pre-computed metrics doc
+    setDoc(doc(db, 'stats', 'global_metrics'), sanitizeForFirestore(stats)).catch(() => {});
+    this.statsCache = { data: stats, expiresAt: now + 60000 };
+    return stats;
+  }
+
+  // ---------------- CUSTOMER SERVICE / SUPPORT TICKETS ----------------
+  async createSupportTicket(ticket: SupportTicket): Promise<SupportTicket> {
+    await setDoc(doc(db, 'supportTickets', ticket.id), sanitizeForFirestore(ticket));
+    if (this.statsCache) {
+      this.statsCache = null; // Invalidate stats cache
+    }
+    return ticket;
+  }
+
+  async getSupportTickets(filter?: { raisedBy?: string; status?: string }): Promise<SupportTicket[]> {
+    try {
+      let q = collection(db, 'supportTickets');
+      const constraints: QueryConstraint[] = [];
+
+      if (filter?.raisedBy) {
+        constraints.push(where('raisedBy', '==', filter.raisedBy));
+      } else if (filter?.status) {
+        constraints.push(where('status', '==', filter.status));
+      }
+
+      constraints.push(limit(50));
+      const snap = await getDocs(query(q, ...constraints));
+      return snap.docs
+        .map((d) => d.data() as SupportTicket)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } catch (err) {
+      console.error('getSupportTickets error:', err);
+      return [];
+    }
+  }
+
+  async updateSupportTicket(id: string, data: Partial<SupportTicket>): Promise<void> {
+    await updateDoc(doc(db, 'supportTickets', id), sanitizeForFirestore({ ...data, updatedAt: new Date().toISOString() }));
+    if (this.statsCache) {
+      this.statsCache = null;
+    }
   }
 }
 

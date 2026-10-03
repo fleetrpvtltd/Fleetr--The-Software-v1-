@@ -12,7 +12,9 @@ import {
   Godown,
   Payment,
   User,
-  AuditLog
+  AuditLog,
+  SupportTicket,
+  DashboardStats
 } from '../types';
 import type { AnomalyAlert, RankedTruck, RankedGodown } from '../backend/aiServices';
 import { MetricCardsSkeleton, TableSkeleton, ListCardSkeleton } from '../components/Skeleton';
@@ -37,7 +39,13 @@ import {
   Compass,
   Trash2,
   Ban,
-  UserCheck
+  UserCheck,
+  LifeBuoy,
+  MessageSquare,
+  Send,
+  Clock,
+  ThumbsUp,
+  CheckCircle2
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -55,7 +63,17 @@ export const AdminDashboard: React.FC = () => {
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
 
   // Active workstation state
-  const [activeWorkstation, setActiveWorkstation] = useState<'MAIN' | 'PIPELINE' | 'WORKSPACE' | 'COMPLIANCE' | 'AUDIT' | 'USERS' | 'TRACKING'>('MAIN');
+  const [activeWorkstation, setActiveWorkstation] = useState<'MAIN' | 'PIPELINE' | 'WORKSPACE' | 'COMPLIANCE' | 'AUDIT' | 'USERS' | 'TRACKING' | 'SUPPORT'>('MAIN');
+
+  // Customer Support & Dispute Desk state
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
+  const [adminReplyNotes, setAdminReplyNotes] = useState('');
+  const [updatingTicketId, setUpdatingTicketId] = useState<string | null>(null);
+  const [ticketStatusFilter, setTicketStatusFilter] = useState<string>('ALL');
+  const [cachedStats, setCachedStats] = useState<DashboardStats | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<number>(0);
 
   // Workstation selection target variables
   const [selectedDelId, setSelectedDelId] = useState<string>('');
@@ -103,6 +121,14 @@ export const AdminDashboard: React.FC = () => {
 
       const anomsData = await apiRequest('/ai/anomalies');
       setAnomalies(anomsData.anomalies || []);
+
+      // B2B Customer Support Tickets
+      const tktData = await apiRequest('/support/tickets').catch(() => ({ tickets: [] }));
+      setTickets(tktData.tickets || []);
+
+      // Aggregate stats (TTL cached on server)
+      const statsData = await apiRequest('/stats/dashboard').catch(() => null);
+      if (statsData) setCachedStats(statsData);
     } catch (err) {
       console.error(err);
     } finally {
@@ -130,13 +156,44 @@ export const AdminDashboard: React.FC = () => {
   };
 
   useEffect(() => {
+    // Initial fetch only - eliminated 10-second polling leak to preserve Firestore free tier (50k reads/day)
     fetchData(true);
-    // Silent real-time background sync every 10 seconds
-    const timer = setInterval(() => {
-      fetchData(false);
-    }, 10000);
-    return () => clearInterval(timer);
   }, []);
+
+  const handleManualSync = async () => {
+    const now = Date.now();
+    if (now - lastSyncTime < 10000) {
+      setSuccess('Data is already up to date. Cooldown: 10s between cloud syncs.');
+      return;
+    }
+    setIsSyncing(true);
+    setLastSyncTime(now);
+    await fetchData(false);
+    setIsSyncing(false);
+    setSuccess('Console state synced with cloud database.');
+  };
+
+  const handleUpdateTicketStatus = async (ticketId: string, status: 'IN_REVIEW' | 'RESOLVED' | 'CLOSED', notes?: string) => {
+    try {
+      setUpdatingTicketId(ticketId);
+      const payloadNotes = notes !== undefined ? notes : adminReplyNotes;
+      await apiRequest(`/support/tickets/${ticketId}`, 'PATCH', {
+        status,
+        adminNotes: payloadNotes
+      });
+      setSuccess(`Support ticket ${ticketId} updated to ${status}.`);
+      setAdminReplyNotes('');
+      const tktData = await apiRequest('/support/tickets').catch(() => ({ tickets: [] }));
+      setTickets(tktData.tickets || []);
+      if (selectedTicket && selectedTicket.id === ticketId) {
+        setSelectedTicket((prev) => prev ? { ...prev, status, adminNotes: payloadNotes } : null);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to update support ticket');
+    } finally {
+      setUpdatingTicketId(null);
+    }
+  };
 
   const triggerPaymentRequest = async (deliveryId: string) => {
     try {
@@ -301,6 +358,13 @@ export const AdminDashboard: React.FC = () => {
           <span>Real-Time Radar & Routing</span>
         </button>
         <button
+          onClick={() => setActiveWorkstation('SUPPORT')}
+          className={`px-3.5 sm:px-4 py-2 min-h-[40px] text-xs font-mono font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 justify-center ${activeWorkstation === 'SUPPORT' ? 'bg-amber-600 text-white shadow-sm font-black' : 'text-slate-500 hover:text-slate-800'}`}
+        >
+          <LifeBuoy className="w-3.5 h-3.5" />
+          <span>Support Desk ({tickets.filter(t => t.status === 'OPEN' || t.status === 'IN_REVIEW').length})</span>
+        </button>
+        <button
           onClick={() => setActiveWorkstation('AUDIT')}
           className={`px-3.5 sm:px-4 py-2 min-h-[40px] text-xs font-mono font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap inline-flex items-center justify-center ${activeWorkstation === 'AUDIT' ? 'bg-white text-slate-900 shadow-sm font-black' : 'text-slate-500 hover:text-slate-800'}`}
         >
@@ -343,14 +407,18 @@ export const AdminDashboard: React.FC = () => {
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
               <span className="text-slate-400 text-xs font-medium block">Active Platform Users</span>
               <div className="flex justify-between items-center mt-2">
-                <span className="text-xl font-display font-extrabold text-slate-850">{usersList.length} Accounts</span>
+                <span className="text-xl font-display font-extrabold text-slate-850">
+                  {cachedStats?.totalUsers ?? usersList.length} Accounts
+                </span>
                 <Users className="w-5 h-5 text-slate-400" />
               </div>
             </div>
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
               <span className="text-slate-400 text-xs font-medium block">Consignments Routed</span>
               <div className="flex justify-between items-center mt-2">
-                <span className="text-xl font-display font-extrabold text-slate-800">{deliveries.length} orders</span>
+                <span className="text-xl font-display font-extrabold text-slate-800">
+                  {cachedStats?.totalDeliveries ?? deliveries.length} orders
+                </span>
                 <Briefcase className="w-5 h-5 text-slate-400" />
               </div>
             </div>
@@ -362,18 +430,20 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-slate-400 text-xs font-medium block">Active Compliance Issues</span>
+              <span className="text-slate-400 text-xs font-medium block">Open Support Disputes</span>
               <div className="flex justify-between items-center mt-2 font-bold">
-                <span className={anomalies.length > 0 ? 'text-rose-600 text-xl font-display font-extrabold' : 'text-slate-800 text-xl font-display font-extrabold'}>
-                  {anomalies.length} Alarms
+                <span className={tickets.filter(t => t.status === 'OPEN' || t.status === 'IN_REVIEW').length > 0 ? 'text-amber-600 text-xl font-display font-extrabold' : 'text-slate-800 text-xl font-display font-extrabold'}>
+                  {tickets.filter(t => t.status === 'OPEN' || t.status === 'IN_REVIEW').length} Inquiries
                 </span>
-                <ShieldAlert className={anomalies.length > 0 ? 'w-5 h-5 text-rose-500' : 'w-5 h-5 text-slate-400'} />
+                <LifeBuoy className={tickets.filter(t => t.status === 'OPEN' || t.status === 'IN_REVIEW').length > 0 ? 'w-5 h-5 text-amber-500' : 'w-5 h-5 text-slate-400'} />
               </div>
             </div>
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs sm:col-span-2 lg:col-span-1">
               <span className="text-slate-400 text-xs font-medium block">Total Platform Turnover</span>
               <div className="flex justify-between items-center mt-2">
-                <span className="text-xl font-display font-extrabold text-emerald-600">₹{totalRevenue.toLocaleString('en-IN')}</span>
+                <span className="text-xl font-display font-extrabold text-emerald-600">
+                  ₹{(cachedStats?.totalRevenue ?? totalRevenue).toLocaleString('en-IN')}
+                </span>
                 <Database className="w-5 h-5 text-emerald-400" />
               </div>
             </div>
@@ -384,8 +454,13 @@ export const AdminDashboard: React.FC = () => {
             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
               <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display">Deliveries Pending Truck/Godown Routing ({pendingAssCount})</h3>
-                <button onClick={() => fetchData()} className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-xs font-medium bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors cursor-pointer active:scale-95">
-                  <RefreshCcw className="w-3.5 h-3.5" /> Sync
+                <button
+                  onClick={handleManualSync}
+                  disabled={isSyncing}
+                  className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-xs font-medium bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  <RefreshCcw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSyncing ? 'Syncing...' : 'Sync'}</span>
                 </button>
               </div>
               <div className="space-y-3 max-h-80 overflow-y-auto">
@@ -1048,6 +1123,352 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOMER SUPPORT & DISPUTE RESOLUTION WORKSTATION */}
+      {activeWorkstation === 'SUPPORT' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          {/* Workstation Header */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <LifeBuoy className="w-5 h-5 text-amber-600" />
+                <h3 className="text-sm font-bold text-slate-900 font-display uppercase tracking-wider">
+                  B2B Customer Support & Dispute Resolution Desk
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500">
+                Supervise business inquiries, consignment disputes, carrier transit incidents, and post-delivery claims.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                className="text-slate-600 hover:text-slate-900 flex items-center gap-1.5 text-xs font-semibold bg-slate-50 hover:bg-slate-100 px-3 py-2 rounded-lg border border-slate-200 transition-colors cursor-pointer active:scale-95 disabled:opacity-50"
+              >
+                <RefreshCcw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync Cloud'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-slate-400 text-xs font-medium block">Total Inquiries</span>
+              <span className="text-xl font-display font-extrabold text-slate-900 mt-1 block">
+                {tickets.length}
+              </span>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-slate-400 text-xs font-medium block">Awaiting Action</span>
+              <span className="text-xl font-display font-extrabold text-blue-600 mt-1 block">
+                {tickets.filter((t) => t.status === 'OPEN').length} Open
+              </span>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-slate-400 text-xs font-medium block">Under Investigation</span>
+              <span className="text-xl font-display font-extrabold text-amber-600 mt-1 block">
+                {tickets.filter((t) => t.status === 'IN_REVIEW').length} In Review
+              </span>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+              <span className="text-slate-400 text-xs font-medium block">Resolved & Cleared</span>
+              <span className="text-xl font-display font-extrabold text-emerald-600 mt-1 block">
+                {tickets.filter((t) => t.status === 'RESOLVED').length} Resolved
+              </span>
+            </div>
+          </div>
+
+          {/* Filters Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['ALL', 'OPEN', 'IN_REVIEW', 'RESOLVED', 'CLOSED'] as const).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setTicketStatusFilter(st)}
+                  className={`px-3 py-1.5 text-xs font-bold font-mono rounded-lg transition-all cursor-pointer ${
+                    ticketStatusFilter === st
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {st.replace('_', ' ')}
+                  <span className="ml-1.5 opacity-75">
+                    ({st === 'ALL' ? tickets.length : tickets.filter((t) => t.status === st).length})
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="text-xs font-medium text-slate-400">
+              Showing {ticketStatusFilter === 'ALL' ? tickets.length : tickets.filter((t) => t.status === ticketStatusFilter).length} tickets
+            </div>
+          </div>
+
+          {/* Master-Detail Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Ticket Roster (5 cols) */}
+            <div className="lg:col-span-5 bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display pb-2 border-b border-slate-100 flex items-center justify-between">
+                <span>Dispute & Support Docket</span>
+                <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
+              </h4>
+
+              {tickets.filter((t) => ticketStatusFilter === 'ALL' || t.status === ticketStatusFilter).length === 0 ? (
+                <div className="text-center py-16 text-slate-400 space-y-2">
+                  <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400" />
+                  <p className="text-xs font-medium">No support tickets match the selected filter.</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5 max-h-[640px] overflow-y-auto pr-1">
+                  {tickets
+                    .filter((t) => ticketStatusFilter === 'ALL' || t.status === ticketStatusFilter)
+                    .map((tkt) => {
+                      const isSelected = selectedTicket?.id === tkt.id;
+                      return (
+                        <div
+                          key={tkt.id}
+                          onClick={() => {
+                            setSelectedTicket(tkt);
+                            setAdminReplyNotes(tkt.adminNotes || '');
+                          }}
+                          className={`p-3.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-amber-500 bg-amber-50/40 ring-1 ring-amber-500 shadow-xs'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/70 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-bold text-[10px] text-slate-900 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                                {tkt.id}
+                              </span>
+                              <span
+                                className={`text-[9px] font-bold uppercase font-mono px-1.5 py-0.5 rounded ${
+                                  tkt.priority === 'CRITICAL'
+                                    ? 'bg-rose-100 text-rose-700'
+                                    : tkt.priority === 'HIGH'
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                {tkt.priority}
+                              </span>
+                            </div>
+                            <span
+                              className={`text-[9px] font-bold uppercase font-mono px-2 py-0.5 rounded-full ${
+                                tkt.status === 'RESOLVED'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : tkt.status === 'IN_REVIEW'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : tkt.status === 'CLOSED'
+                                  ? 'bg-slate-200 text-slate-700'
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}
+                            >
+                              {tkt.status.replace('_', ' ')}
+                            </span>
+                          </div>
+
+                          <h5 className="font-bold text-slate-900 line-clamp-1 mb-1">{tkt.subject}</h5>
+                          <p className="text-slate-500 line-clamp-2 text-[11px] leading-relaxed mb-2">
+                            {tkt.description}
+                          </p>
+
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1.5 border-t border-slate-100">
+                            <span>{tkt.deliveryId ? `Order: ${tkt.deliveryId}` : 'General Inquiry'}</span>
+                            <span>{new Date(tkt.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            {/* Ticket Details & Resolution Workstation (7 cols) */}
+            <div className="lg:col-span-7 bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-5">
+              {!selectedTicket ? (
+                <div className="text-center py-24 text-slate-400 space-y-3">
+                  <LifeBuoy className="w-10 h-10 mx-auto text-slate-300" />
+                  <div className="space-y-1">
+                    <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-display">
+                      Select a Support Ticket
+                    </h5>
+                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                      Click any dispute or ticket from the roster to inspect linked consignment audit trail, cargo data, and formulate an official administrator resolution.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-5 animate-in fade-in duration-200">
+                  {/* Selected Ticket Header */}
+                  <div className="border-b border-slate-100 pb-4 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-extrabold text-slate-900 bg-slate-100 border border-slate-200 px-2 py-1 rounded">
+                          {selectedTicket.id}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold uppercase font-mono px-2 py-0.5 rounded ${
+                            selectedTicket.priority === 'CRITICAL'
+                              ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                              : selectedTicket.priority === 'HIGH'
+                              ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {selectedTicket.priority} Priority
+                        </span>
+                        <span className="text-[10px] font-bold uppercase font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                          {selectedTicket.category.replace('_', ' ')}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`text-xs font-bold uppercase font-mono px-3 py-1 rounded-full ${
+                          selectedTicket.status === 'RESOLVED'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            : selectedTicket.status === 'IN_REVIEW'
+                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                            : selectedTicket.status === 'CLOSED'
+                            ? 'bg-slate-200 text-slate-700'
+                            : 'bg-blue-100 text-blue-800 border border-blue-300'
+                        }`}
+                      >
+                        {selectedTicket.status.replace('_', ' ')}
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-bold text-slate-900">{selectedTicket.subject}</h4>
+
+                    <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 font-mono">
+                      <span>Filed by: {selectedTicket.raisedByName || selectedTicket.raisedByEmail || selectedTicket.raisedBy}</span>
+                      <span>Filed on: {new Date(selectedTicket.createdAt).toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  {/* Linked Consignment Preview (if any) */}
+                  {selectedTicket.deliveryId && (() => {
+                    const linkedDel = deliveries.find((d) => d.id === selectedTicket.deliveryId);
+                    return (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700 font-display flex items-center gap-1.5">
+                            <Briefcase className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Linked Consignment Docket: {selectedTicket.deliveryId}</span>
+                          </span>
+                          {linkedDel && (
+                            <span className="font-mono text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                              {linkedDel.status}
+                            </span>
+                          )}
+                        </div>
+                        {linkedDel ? (
+                          <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+                            <div><span className="text-slate-400">Route:</span> {linkedDel.pickupLocation} ➔ {linkedDel.destinationLocation}</div>
+                            <div><span className="text-slate-400">Cargo:</span> {linkedDel.goodsCategory} ({linkedDel.goodsWeightKg} kg)</div>
+                            <div><span className="text-slate-400">Description:</span> {linkedDel.goodsDescription}</div>
+                            <div><span className="text-slate-400">Vehicle Assigned:</span> {linkedDel.assignedVehicleId || 'Pending'}</div>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-500">Order metadata registered in database docket.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Incident Description */}
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-slate-700 block uppercase tracking-wider font-display">
+                      Incident / Dispute Narrative
+                    </span>
+                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
+                      {selectedTicket.description}
+                    </div>
+                  </div>
+
+                  {/* Existing Resolution Notice if any */}
+                  {selectedTicket.adminNotes && selectedTicket.status === 'RESOLVED' && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-emerald-800 text-xs font-bold">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>Dispute Officially Resolved</span>
+                        {selectedTicket.resolvedAt && (
+                          <span className="text-[10px] font-mono text-emerald-600 font-normal">
+                            ({new Date(selectedTicket.resolvedAt).toLocaleString()})
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-emerald-900 pl-5 leading-relaxed">{selectedTicket.adminNotes}</p>
+                    </div>
+                  )}
+
+                  {/* Resolution Input & Actions */}
+                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                    <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider font-display">
+                      Administrator Resolution Notes & Response
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={adminReplyNotes}
+                      onChange={(e) => setAdminReplyNotes(e.target.value)}
+                      placeholder="Specify dispute investigation findings, carrier compensation, settlement adjustments, or operational instructions..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none font-sans"
+                    />
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-2">
+                        {selectedTicket.status !== 'IN_REVIEW' && (
+                          <button
+                            type="button"
+                            disabled={updatingTicketId === selectedTicket.id}
+                            onClick={() => handleUpdateTicketStatus(selectedTicket.id, 'IN_REVIEW')}
+                            className="px-3 py-1.5 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Mark In Review
+                          </button>
+                        )}
+                        {selectedTicket.status !== 'CLOSED' && (
+                          <button
+                            type="button"
+                            disabled={updatingTicketId === selectedTicket.id}
+                            onClick={() => handleUpdateTicketStatus(selectedTicket.id, 'CLOSED')}
+                            className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Close Ticket
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={updatingTicketId === selectedTicket.id}
+                        onClick={() => handleUpdateTicketStatus(selectedTicket.id, 'RESOLVED')}
+                        className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all cursor-pointer inline-flex items-center gap-2 disabled:opacity-50 active:scale-95"
+                      >
+                        {updatingTicketId === selectedTicket.id ? (
+                          <>
+                            <RefreshCcw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Updating Docket...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            <span>Resolve & Save Resolution</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

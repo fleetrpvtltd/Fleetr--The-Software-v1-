@@ -81,6 +81,7 @@ export interface Vehicle {
   currentLocationName?: string;
   speedKmh?: number;
   status?: 'IDLE' | 'MOVING' | 'IN_TRANSIT' | 'LOADING' | 'MAINTENANCE';
+  isAvailable?: boolean;
 }
 
 export interface Driver {
@@ -136,6 +137,7 @@ export interface Delivery {
   consigneeGstin: string;
   status: DeliveryStatus;
   createdAt: string;
+  deliveredAt?: string;
   assignedVehicleId?: string;
   assignedDriverId?: string;
 }
@@ -146,6 +148,7 @@ export interface Assignment {
   vehicleId?: string;
   driverId?: string;
   godownId?: string;
+  status?: string;
   aiRecommended: boolean;
   overrideReason?: string;
   assignedAt: string;
@@ -227,4 +230,36 @@ export interface AiRecommendation {
   forecast3Day: number;
   forecast7Day: number;
   timestamp: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  deliveryId?: string;
+  raisedBy: string; // userId
+  raisedByName: string;
+  raisedByEmail: string;
+  raisedByRole: UserRole;
+  category: 'SHIPMENT_DELAY' | 'CARGO_DAMAGE' | 'PAYMENT_ISSUE' | 'TRUCK_BREAKDOWN' | 'GENERAL_DISPUTE';
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  subject: string;
+  description: string;
+  status: 'OPEN' | 'IN_REVIEW' | 'RESOLVED' | 'CLOSED';
+  adminNotes?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardStats {
+  totalDeliveries: number;
+  activeDeliveries: number;
+  completedDeliveries: number;
+  totalFreightRevenue: number;
+  totalRevenue?: number;
+  totalFleetVehicles: number;
+  availableVehicles: number;
+  totalGodowns: number;
+  totalUsers?: number;
+  openSupportTickets: number;
+  lastCalculatedAt: string;
 }
