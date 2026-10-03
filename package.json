@@ -1,0 +1,15 @@
+{
+  "name": "fleetr-root",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Fleetr Freight & Fleet Management Platform",
+  "scripts": {
+    "dev": "cd fleetr && npm run dev",
+    "build": "cd fleetr && npm run build",
+    "start": "cd fleetr && npm start",
+    "lint": "cd fleetr && npm run lint"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,177 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents registered cargo/vehicle hub users with specific SaaS roles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["BUSINESS_OWNER", "TRUCK_OWNER", "GODOWN_OWNER", "ADMIN"] },
+        "gstin": { "type": "string" },
+        "organizationName": { "type": "string" },
+        "address": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING_VERIFICATION", "ACTIVE", "SUSPENDED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email", "role", "status", "createdAt"]
+    },
+    "Delivery": {
+      "title": "Delivery",
+      "description": "Freight transport delivery orders filed by Business Owners",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "goodsDescription": { "type": "string" },
+        "goodsCategory": { "type": "string" },
+        "goodsWeightKg": { "type": "number" },
+        "goodsVolumeCubicCm": { "type": "number" },
+        "goodsValueInr": { "type": "number" },
+        "pickupDate": { "type": "string" },
+        "pickupLocation": { "type": "string" },
+        "destinationLocation": { "type": "string" },
+        "intermediateGodownId": { "type": "string" },
+        "specialInstructions": { "type": "string" },
+        "urgencyLevel": { "type": "string", "enum": ["STANDARD", "EXPRESS", "SAME_DAY"] },
+        "ewayBillNo": { "type": "string" },
+        "consignorGstin": { "type": "string" },
+        "consigneeGstin": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "assignedVehicleId": { "type": "string" },
+        "assignedDriverId": { "type": "string" }
+      },
+      "required": ["id", "customerId", "goodsDescription", "goodsCategory", "goodsWeightKg", "pickupDate", "pickupLocation", "destinationLocation", "consignorGstin", "consigneeGstin", "status", "createdAt"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Heavy commercial trucks with integration profiles to VAHAN limits",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "chassisNumber": { "type": "string" },
+        "engineNumber": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "capacityKg": { "type": "number" },
+        "volumeCubicCm": { "type": "number" },
+        "rcStatus": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "EXPIRED"] },
+        "fitnessValidUntil": { "type": "string" },
+        "insuranceValidUntil": { "type": "string" },
+        "taxValidUntil": { "type": "string" },
+        "vahanVerified": { "type": "boolean" },
+        "fastagStatus": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "LOW_BALANCE"] },
+        "fastagBalance": { "type": "number" },
+        "pendingChallansCount": { "type": "number" },
+        "lastTollPlaza": { "type": "string" },
+        "lastTollTime": { "type": "string" }
+      },
+      "required": ["id", "ownerId", "vehicleNumber", "chassisNumber", "engineNumber", "rcStatus", "vahanVerified"]
+    },
+    "Driver": {
+      "title": "Driver",
+      "description": "Heavy transport drivers linked to truck owners with Sarathi details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "dlNumber": { "type": "string" },
+        "dob": { "type": "string" },
+        "dlStatus": { "type": "string", "enum": ["Active", "Inactive"] },
+        "hasTransportEndorsement": { "type": "boolean" },
+        "sarathiVerified": { "type": "boolean" },
+        "consentTimestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "name", "phone", "dlNumber", "dob", "dlStatus", "sarathiVerified"]
+    },
+    "Godown": {
+      "title": "Godown",
+      "description": "Staging spatial warehouses registered by storage facility owners",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "address": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "totalCapacityKg": { "type": "number" },
+        "availableCapacityKg": { "type": "number" },
+        "storageTypes": { "type": "array" },
+        "handlingTimeHours": { "type": "number" }
+      },
+      "required": ["id", "ownerId", "name", "location", "address", "totalCapacityKg", "availableCapacityKg", "storageTypes"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Freight bill transactions with unified invoice calculation values",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "deliveryId": { "type": "string" },
+        "baseFreight": { "type": "number" },
+        "distanceKm": { "type": "number" },
+        "tollSurcharge": { "type": "number" },
+        "gstRate": { "type": "number" },
+        "tdsRate": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["PENDING", "CAPTURED", "FAILED"] },
+        "gatewayOrderId": { "type": "string" },
+        "gatewayPaymentId": { "type": "string" },
+        "paidAt": { "type": "string" }
+      },
+      "required": ["id", "deliveryId", "baseFreight", "distanceKm", "tollSurcharge", "gstRate", "tdsRate", "totalAmount", "status"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Legally audit-compliant commercial transport billing invoices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "deliveryId": { "type": "string" },
+        "paymentId": { "type": "string" },
+        "invoiceNo": { "type": "string" },
+        "amount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "deliveryId", "paymentId", "invoiceNo", "amount", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles locked down and verified strictly by identity"
+    },
+    "/deliveries/{deliveryId}": {
+      "schema": "Delivery",
+      "description": "Consignments managed of freight cargo routes"
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": "Vehicle",
+      "description": "Registered heavy commercial trucks list"
+    },
+    "/drivers/{driverId}": {
+      "schema": "Driver",
+      "description": "Heavy loaders certified under logistics licenses"
+    },
+    "/godowns/{godownId}": {
+      "schema": "Godown",
+      "description": "Spatial warehouses and cargo hubs"
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Financial records of deliveries"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Invoices made of delivery bills"
+    }
+  }
+}

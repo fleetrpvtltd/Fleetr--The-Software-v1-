@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == userId || request.auth.token.role == 'ADMIN');
+    }
+
+    match /deliveries/{deliveryId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /vehicles/{vehicleId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /drivers/{driverId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /godowns/{godownId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /payments/{paymentId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Invoices are immutable financial documents: cannot be deleted
+    match /invoices/{invoiceId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Audit logs are append-only: cannot be modified or deleted
+    match /auditLogs/{logId} {
+      allow read, create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /assignments/{assignmentId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Customer support & dispute management
+    match /supportTickets/{ticketId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Pre-computed aggregation metrics documents
+    match /stats/{statId} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}
