@@ -384,7 +384,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
               <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display">Deliveries Pending Truck/Godown Routing ({pendingAssCount})</h3>
-                <button onClick={fetchData} className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-xs font-medium bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors cursor-pointer active:scale-95">
+                <button onClick={() => fetchData()} className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-xs font-medium bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors cursor-pointer active:scale-95">
                   <RefreshCcw className="w-3.5 h-3.5" /> Sync
                 </button>
               </div>

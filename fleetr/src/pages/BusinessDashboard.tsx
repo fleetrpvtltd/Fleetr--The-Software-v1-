@@ -388,7 +388,7 @@ export const BusinessDashboard: React.FC = () => {
             <div className="px-4 sm:px-5 py-3.5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display">Registered Dispatch Pipeline</h3>
               <button
-                onClick={fetchData}
+                onClick={() => fetchData()}
                 className="text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 px-3.5 py-1.5 min-h-[38px] rounded-lg border border-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow-2xs"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> Sync UI

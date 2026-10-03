@@ -21,6 +21,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(() => getLocalUser());
   const [loading, setLoading] = useState<boolean>(() => !getLocalUser());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeNavTab, setActiveNavTab] = useState<'WORKSPACE'>('WORKSPACE');
 
   const isMasterAdmin =
     user?.role === 'ADMIN' ||
