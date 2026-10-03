@@ -10,6 +10,7 @@ const envSchema = z.object({
   MONGO_URI: z.string().default('mongodb://localhost:27017/fleetr'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
   FIREBASE_SERVICE_ACCOUNT_KEY: z.string().optional(),
+  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   ULIP_BASE_URL: z.string().optional(),
   ULIP_CLIENT_ID: z.string().optional(),
   ULIP_CLIENT_SECRET: z.string().optional(),
