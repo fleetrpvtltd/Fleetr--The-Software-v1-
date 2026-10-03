@@ -79,7 +79,10 @@ export class DbService {
   // ---------------- AUTHENTICATION & SEEDING ----------------
   async authenticateServer() {
     let adminUid: string | null = auth.currentUser?.uid || null;
-    const adminPass = process.env.ADMIN_PASSWORD || 'emon@7890';
+    const adminPass = process.env.ADMIN_PASSWORD;
+    if (!adminPass) {
+      return null;
+    }
 
     if (!adminUid) {
       try {
@@ -736,10 +739,15 @@ export class DbService {
     }
   }
 
-  async getInvoices(): Promise<Invoice[]> {
+  async getInvoices(deliveryIds?: string[]): Promise<Invoice[]> {
     try {
       const snap = await getDocs(collection(db, 'invoices'));
-      return snap.docs.map((d) => d.data() as Invoice);
+      let list = snap.docs.map((d) => d.data() as Invoice);
+      if (deliveryIds) {
+        if (deliveryIds.length === 0) return [];
+        list = list.filter((inv) => deliveryIds.includes(inv.deliveryId));
+      }
+      return list;
     } catch (err) {
       console.error('getInvoices error:', err);
       return [];

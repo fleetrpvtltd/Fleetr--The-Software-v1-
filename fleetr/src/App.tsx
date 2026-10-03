@@ -115,10 +115,9 @@ export default function App() {
       }
     };
 
-    const interval = setInterval(syncAccountStatus, 6000);
+    // Sync account status on tab focus without continuous polling leak
     window.addEventListener('focus', syncAccountStatus);
     return () => {
-      clearInterval(interval);
       window.removeEventListener('focus', syncAccountStatus);
     };
   }, [user]);

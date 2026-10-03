@@ -23,9 +23,14 @@ import { calculateRealTariffAndRoute, findHub, LOGISTICS_HUBS } from './routingE
 import { executeRealtimeRoutingAnalysis, enrichVehicleTelemetry } from './geospatialService';
 import { User, Vehicle, Driver, Godown, Delivery, Payment, Invoice, Notification, AuditLog, Assignment, SupportTicket, DashboardStats } from '../types';
 
+export const MASTER_ADMIN_EMAILS = [
+  'emonpoddar01@gmail.com',
+  'nilavra.s2007@gmail.com'
+];
+
 export const apiRouter = Router();
 
-// Per-request authentication validator using firebase-admin verifyIdToken() with session fallback
+// Per-request authentication validator using firebase-admin verifyIdToken()
 export async function authenticateRequest(req: Request): Promise<User | null> {
   // If already authenticated on this request lifecycle, return the per-request user
   if ((req as any).user !== undefined) {
@@ -43,7 +48,7 @@ export async function authenticateRequest(req: Request): Promise<User | null> {
     return null;
   }
 
-  // 1. Try Firebase Admin token verification if token is a standard 3-part JWT
+  // Strictly verify Firebase ID Token using Firebase Admin SDK
   if (token.split('.').length === 3) {
     try {
       const decodedToken = await adminAuth.verifyIdToken(token);
@@ -59,38 +64,9 @@ export async function authenticateRequest(req: Request): Promise<User | null> {
         return user;
       }
     } catch (err: any) {
-      // Direct JWT payload unpack fallback only if firebase-admin cert verification is not available
-      try {
-        const parts = token.split('.');
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-        const uid = payload.user_id || payload.sub || payload.uid;
-        const email = payload.email;
-
-        if (uid) {
-          let user = await dbService.getUser(uid);
-          if (!user && email) {
-            user = await dbService.getUserByEmail(email);
-          }
-          if (user) {
-            (req as any).user = user;
-            return user;
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  // 2. Local session fallback by user id
-  if (token.length > 0 && token.length < 100) {
-    let user = await dbService.getUser(token);
-    if (!user) {
-      user = await dbService.getUserByEmail(token);
-    }
-    if (user) {
-      (req as any).user = user;
-      return user;
+      console.warn('Firebase ID token verification failed:', err?.message || err);
+      (req as any).user = null;
+      return null;
     }
   }
 
@@ -126,8 +102,7 @@ export function checkRole(roles: string[]) {
 
     const isMasterAdmin =
       user.role === 'ADMIN' ||
-      user.email === 'emonpoddar01@gmail.com' ||
-      user.email === 'nilavra.s2007@gmail.com';
+      MASTER_ADMIN_EMAILS.includes(user.email);
 
     // Admins possess universal superuser privileges across workspaces
     if (!roles.includes(user.role) && !isMasterAdmin) {
@@ -153,14 +128,20 @@ export function checkRole(roles: string[]) {
 async function logAction(req: Request | null, actionName: string, details: string) {
   try {
     const user = req ? await getCurrentUser(req) : null;
+    const clientIp = req
+      ? ((req.headers['x-forwarded-for'] as string) || req.ip || req.socket.remoteAddress || '127.0.0.1')
+          .split(',')[0]
+          .trim()
+      : '127.0.0.1';
+
     const newLog: AuditLog = {
-      id: `aud_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: `aud_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       userId: user ? user.id : 'usr_system',
       userName: user ? user.name : 'System Gateway',
       userRole: user ? user.role : 'ADMIN',
       action: actionName,
       details: details,
-      ipPlaceholder: '192.168.1.101',
+      ipPlaceholder: clientIp,
       timestamp: new Date().toISOString()
     };
     await dbService.createAuditLog(newLog);
@@ -176,21 +157,34 @@ apiRouter.post('/auth/register', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Ensure Name, Email and Role are correct' });
   }
 
+  // Prevent unauthorized escalation to ADMIN role
+  if (role === 'ADMIN') {
+    const caller = await getCurrentUser(req);
+    const isCallerMasterAdmin =
+      caller?.role === 'ADMIN' || (caller?.email && MASTER_ADMIN_EMAILS.includes(caller.email));
+    if (!isCallerMasterAdmin && !MASTER_ADMIN_EMAILS.includes(email.toLowerCase())) {
+      return res.status(403).json({
+        error: 'ADMIN_REGISTRATION_FORBIDDEN',
+        message: 'Administrative master accounts cannot be self-registered.'
+      });
+    }
+  }
+
   const existing = (id ? await dbService.getUser(id) : null) || (await dbService.getUserByEmail(email));
   if (existing) {
     existing.name = name;
     existing.phone = phone || existing.phone || '+919999900000';
-    existing.role = role || existing.role;
+    // Preserve existing role: do NOT allow arbitrary role reassignment via registration sync
     existing.gstin = gstin || existing.gstin;
     existing.organizationName = companyName || existing.organizationName;
     existing.address = address || existing.address;
-    await logAction(req, 'SYNC', `Synchronized profile details for ${role}`);
+    await logAction(req, 'SYNC', `Synchronized profile details for ${existing.role}`);
     await dbService.setUser(existing.id, existing);
     return res.json({ success: true, user: existing });
   }
 
   const newUser: User = {
-    id: id || `usr_${Date.now()}`,
+    id: id || `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     name,
     email,
     phone: phone || '+919999900000',
@@ -219,27 +213,22 @@ apiRouter.post('/auth/register', async (req: Request, res: Response) => {
 
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
-  const adminPass = process.env.ADMIN_PASSWORD || 'emon@7890';
+  const adminPass = process.env.ADMIN_PASSWORD;
 
-  // Seed credential override
-  if (email === 'emonpoddar01@gmail.com' && password === adminPass) {
+  // Dedicated Seed Admin login with configured ADMIN_PASSWORD env var
+  if (adminPass && email && MASTER_ADMIN_EMAILS.includes(email.toLowerCase()) && password === adminPass) {
     const adminUser = (await dbService.getUserByEmail(email)) || (await dbService.getUserByRole('ADMIN'));
     if (adminUser) {
-      await logAction(req, 'LOGIN', 'Administrative master account logged in');
+      await logAction(req, 'LOGIN', 'Administrative master account logged in via configured admin password');
       return res.json({ success: true, user: adminUser });
     }
   }
 
-  const user = await dbService.getUserByEmail(email);
-  if (user) {
-    if (user.status === 'SUSPENDED') {
-      return res.status(403).json({ error: 'SUSPENDED', message: 'This user account is suspended by Admin' });
-    }
-    await logAction(req, 'LOGIN', `Logged back in to ${user.role} profile`);
-    return res.json({ success: true, user });
-  }
-
-  res.status(401).json({ error: 'AUTH_FAILED', message: 'User not registered. Please complete registration block' });
+  // All standard logins must authenticate via Firebase Auth client SDK (which returns a verified JWT)
+  res.status(401).json({
+    error: 'AUTH_REQUIRED',
+    message: 'User authentication must be performed via Firebase Auth.'
+  });
 });
 
 apiRouter.get('/auth/me', async (req: Request, res: Response) => {
@@ -284,8 +273,7 @@ apiRouter.patch('/users/:id/status', checkRole(['ADMIN']), async (req: Request, 
     if (
       user.role === 'ADMIN' ||
       user.id === 'usr_admin' ||
-      user.email === 'emonpoddar01@gmail.com' ||
-      user.email === 'nilavra.s2007@gmail.com'
+      MASTER_ADMIN_EMAILS.includes(user.email)
     ) {
       return res.status(400).json({ error: 'ADMIN_CANNOT_BE_SUSPENDED', message: 'Master Admin account cannot be suspended.' });
     }
@@ -322,8 +310,7 @@ apiRouter.delete('/users/:id', checkRole(['ADMIN']), async (req: Request, res: R
     if (
       user.role === 'ADMIN' ||
       user.id === 'usr_admin' ||
-      user.email === 'emonpoddar01@gmail.com' ||
-      user.email === 'nilavra.s2007@gmail.com'
+      MASTER_ADMIN_EMAILS.includes(user.email)
     ) {
       return res.status(400).json({ error: 'CANNOT_DELETE_ADMIN', message: 'Master Admin account is protected and cannot be deleted.' });
     }
@@ -347,18 +334,18 @@ apiRouter.delete('/users/:id', checkRole(['ADMIN']), async (req: Request, res: R
 });
 
 // ---------------- FLEET & VEHICLES ----------------
-apiRouter.get('/fleet/vehicles', async (req: Request, res: Response) => {
-  const user = await getCurrentUser(req);
+apiRouter.get('/fleet/vehicles', checkRole(['TRUCK_OWNER', 'ADMIN', 'BUSINESS_OWNER', 'GODOWN_OWNER']), async (req: Request, res: Response) => {
+  const user = (req as any).user as User;
   const limitCount = req.query.limit ? Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10))) : 20;
   const startAfterCursor = (req.query.startAfter as string) || (req.query.cursor as string) || undefined;
 
   let ownerId: string | undefined = undefined;
-  if (user?.role === 'ADMIN') {
+  if (user.role === 'ADMIN') {
     if (req.query.ownerId) {
       ownerId = req.query.ownerId as string;
     }
-  } else {
-    ownerId = user ? user.id : 'usr_truck_1';
+  } else if (user.role === 'TRUCK_OWNER') {
+    ownerId = user.id;
   }
 
   const result = await dbService.getVehicles({
@@ -377,11 +364,11 @@ apiRouter.get('/fleet/vehicles', async (req: Request, res: Response) => {
 
 apiRouter.post('/fleet/vehicles', checkRole(['TRUCK_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
   const { vehicleNumber, chassisNumber, engineNumber, vehicleType, capacityKg, volumeCubicCm } = req.body;
-  const user = await getCurrentUser(req);
-  const ownerId = user?.id || 'usr_truck_1';
+  const user = (req as any).user as User;
+  const ownerId = user.id;
 
   const newVeh: Vehicle = {
-    id: `veh_${Date.now()}`,
+    id: `veh_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     ownerId,
     vehicleNumber,
     chassisNumber,
@@ -461,24 +448,23 @@ apiRouter.post('/fleet/vehicles/:id/check-echallan', checkRole(['TRUCK_OWNER', '
 });
 
 // ---------------- DRIVERS ----------------
-apiRouter.get('/drivers', async (req: Request, res: Response) => {
-  const user = await getCurrentUser(req);
-  if (user?.role === 'ADMIN') {
+apiRouter.get('/drivers', checkRole(['TRUCK_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
+  const user = (req as any).user as User;
+  if (user.role === 'ADMIN') {
     const drivers = await dbService.getDrivers();
     return res.json({ drivers });
   }
-  const ownerId = user ? user.id : 'usr_truck_1';
-  const drivers = await dbService.getDrivers(ownerId);
+  const drivers = await dbService.getDrivers(user.id);
   res.json({ drivers });
 });
 
 apiRouter.post('/drivers', checkRole(['TRUCK_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
   const { name, phone, dlNumber, dob } = req.body;
-  const user = await getCurrentUser(req);
-  const ownerId = user?.id || 'usr_truck_1';
+  const user = (req as any).user as User;
+  const ownerId = user.id;
 
   const newDriver: Driver = {
-    id: `drv_${Date.now()}`,
+    id: `drv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     ownerId,
     name,
     phone,
@@ -535,24 +521,23 @@ apiRouter.patch('/drivers/:id', checkRole(['TRUCK_OWNER', 'ADMIN']), async (req:
 });
 
 // ---------------- GODOWNS ----------------
-apiRouter.get('/godowns', async (req: Request, res: Response) => {
-  const user = await getCurrentUser(req);
-  if (user?.role === 'ADMIN') {
+apiRouter.get('/godowns', checkRole(['GODOWN_OWNER', 'ADMIN', 'BUSINESS_OWNER', 'TRUCK_OWNER']), async (req: Request, res: Response) => {
+  const user = (req as any).user as User;
+  if (user.role === 'ADMIN' || user.role === 'BUSINESS_OWNER') {
     const godowns = await dbService.getGodowns();
     return res.json({ godowns });
   }
-  const ownerId = user ? user.id : 'usr_godown_1';
-  const godowns = await dbService.getGodowns(ownerId);
+  const godowns = await dbService.getGodowns(user.id);
   res.json({ godowns });
 });
 
 apiRouter.post('/godowns', checkRole(['GODOWN_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
   const { name, location, address, totalCapacityKg, storageTypes, handlingTimeHours, dimensions } = req.body;
-  const user = await getCurrentUser(req);
-  const ownerId = user?.id || 'usr_godown_1';
+  const user = (req as any).user as User;
+  const ownerId = user.id;
 
   const newGdn: Godown = {
-    id: `gdn_${Date.now()}`,
+    id: `gdn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     ownerId,
     name,
     location,
@@ -602,8 +587,8 @@ apiRouter.post('/godowns/:id/recalculate-capacity', checkRole(['GODOWN_OWNER', '
 });
 
 // ---------------- DELIVERIES ----------------
-apiRouter.get('/deliveries', async (req: Request, res: Response) => {
-  const user = await getCurrentUser(req);
+apiRouter.get('/deliveries', checkRole(['BUSINESS_OWNER', 'TRUCK_OWNER', 'GODOWN_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
+  const user = (req as any).user as User;
   const limitCount = req.query.limit ? Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10))) : 20;
   const startAfterCursor = (req.query.startAfter as string) || (req.query.cursor as string) || undefined;
   const statusFilter = (req.query.status as string) || undefined;
@@ -617,36 +602,33 @@ apiRouter.get('/deliveries', async (req: Request, res: Response) => {
     filter.status = statusFilter;
   }
 
-  if (user?.role === 'ADMIN') {
+  if (user.role === 'ADMIN') {
     if (req.query.customerId) {
       filter.customerId = req.query.customerId as string;
     }
-  } else {
-    const userId = user ? user.id : 'usr_biz_1';
-    if (user?.role === 'BUSINESS_OWNER') {
-      filter.customerId = userId;
-    } else if (user?.role === 'TRUCK_OWNER') {
-      if (scope === 'available') {
-        filter.status = 'CONFIRMED';
-      } else {
-        const myVehs = (await dbService.getVehicles({ ownerId: userId, limitCount: 100 })).vehicles.map((v) => v.id);
-        const myDrivers = (await dbService.getDrivers(userId)).map((d) => d.id);
-        if (myVehs.length === 0 && myDrivers.length === 0) {
-          return res.json({ deliveries: [], nextCursor: null, hasMore: false, total: 0 });
-        }
-        if (myVehs.length > 0) {
-          filter.vehicleIds = myVehs;
-        }
-      }
-    } else if (user?.role === 'GODOWN_OWNER') {
-      const myWarehouses = (await dbService.getGodowns(userId)).map((g) => g.id);
-      if (myWarehouses.length === 0) {
+  } else if (user.role === 'BUSINESS_OWNER') {
+    filter.customerId = user.id;
+  } else if (user.role === 'TRUCK_OWNER') {
+    if (scope === 'available') {
+      filter.status = 'CONFIRMED';
+    } else {
+      const myVehs = (await dbService.getVehicles({ ownerId: user.id, limitCount: 100 })).vehicles.map((v) => v.id);
+      const myDrivers = (await dbService.getDrivers(user.id)).map((d) => d.id);
+      if (myVehs.length === 0 && myDrivers.length === 0) {
         return res.json({ deliveries: [], nextCursor: null, hasMore: false, total: 0 });
       }
-      filter.godownIds = myWarehouses;
-    } else {
+      if (myVehs.length > 0) {
+        filter.vehicleIds = myVehs;
+      }
+    }
+  } else if (user.role === 'GODOWN_OWNER') {
+    const myWarehouses = (await dbService.getGodowns(user.id)).map((g) => g.id);
+    if (myWarehouses.length === 0) {
       return res.json({ deliveries: [], nextCursor: null, hasMore: false, total: 0 });
     }
+    filter.godownIds = myWarehouses;
+  } else {
+    return res.json({ deliveries: [], nextCursor: null, hasMore: false, total: 0 });
   }
 
   const result = await dbService.getDeliveries(filter);
@@ -718,8 +700,8 @@ apiRouter.post('/deliveries', checkRole(['BUSINESS_OWNER', 'ADMIN']), async (req
     intermediateGodownId
   } = req.body;
 
-  const user = await getCurrentUser(req);
-  const customerId = user?.id || 'usr_biz_1';
+  const user = (req as any).user as User;
+  const customerId = user.id;
 
   // Calculate realistic highway route, toll checkpoints, and commercial freight tariff
   const weightNum = Number(goodsWeightKg) || 1000;
@@ -731,7 +713,7 @@ apiRouter.post('/deliveries', checkRole(['BUSINESS_OWNER', 'ADMIN']), async (req
   );
 
   const newDel: Delivery = {
-    id: `del_${Date.now()}`,
+    id: `del_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     customerId,
     goodsDescription,
     goodsCategory: goodsCategory || 'General Goods',
@@ -997,19 +979,31 @@ const handlePaymentCapture = async (req: Request, res: Response) => {
 apiRouter.post('/payments/capture', checkRole(['BUSINESS_OWNER', 'ADMIN']), handlePaymentCapture);
 apiRouter.post('/payments/mock-success', checkRole(['BUSINESS_OWNER', 'ADMIN']), handlePaymentCapture);
 
-apiRouter.get('/payments', async (req: Request, res: Response) => {
-  const user = await getCurrentUser(req);
-  if (user?.role === 'ADMIN') {
+apiRouter.get('/payments', checkRole(['BUSINESS_OWNER', 'TRUCK_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
+  const user = (req as any).user as User;
+  if (user.role === 'ADMIN') {
     const payments = await dbService.getPayments();
     return res.json({ payments });
   }
-  const myDels = await dbService.getDeliveries({ customerId: user?.id });
-  const myDelIds = myDels.map((d) => d.id);
+  const myDels = await dbService.getDeliveries({ customerId: user.id });
+  const myDelIds = myDels.deliveries.map((d) => d.id);
   const payments = await dbService.getPayments(myDelIds);
   res.json({ payments });
 });
 
 // ---------------- INVOICES ----------------
+apiRouter.get('/invoices', checkRole(['BUSINESS_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
+  const user = (req as any).user as User;
+  if (user.role === 'ADMIN') {
+    const invoices = await dbService.getInvoices();
+    return res.json({ invoices });
+  }
+  const myDels = await dbService.getDeliveries({ customerId: user.id });
+  const myDelIds = myDels.deliveries.map((d) => d.id);
+  const invoices = await dbService.getInvoices(myDelIds);
+  res.json({ invoices });
+});
+
 apiRouter.get('/invoices/:id/download', async (req: Request, res: Response) => {
   const inv = await dbService.getInvoice(req.params.id);
   if (!inv) return res.status(404).json({ error: 'NOT_FOUND' });
@@ -1053,8 +1047,10 @@ LR CHECKPAY STATUS: CAPTURED (Razorpay Verified)
 // ---------------- NOTIFICATIONS ----------------
 apiRouter.get('/notifications', async (req: Request, res: Response) => {
   const user = await getCurrentUser(req);
-  const userId = user ? user.id : 'usr_biz_1';
-  const notifications = await dbService.getNotifications(userId);
+  if (!user) {
+    return res.json({ notifications: [] });
+  }
+  const notifications = await dbService.getNotifications(user.id);
   res.json({ notifications });
 });
 

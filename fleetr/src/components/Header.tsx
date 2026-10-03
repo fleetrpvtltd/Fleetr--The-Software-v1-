@@ -88,8 +88,6 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
 
   useEffect(() => {
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 10000);
-    return () => clearInterval(interval);
   }, [user]);
 
   const switchRole = async (targetRole: UserRole) => {
@@ -100,22 +98,7 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
         setShowNotif(false);
       }
     } catch (err) {
-      // If role switches fail (e.g. not created yet), auto register it on the fly!
-      try {
-        let name = targetRole.replace('_', ' ').toLowerCase();
-        name = name.charAt(0).toUpperCase() + name.slice(1);
-        const reg = await apiRequest('/auth/register', 'POST', {
-          name,
-          email: `${targetRole.toLowerCase()}@fleetr.io`,
-          role: targetRole,
-          phone: '+919999900000'
-        });
-        if (reg.success) {
-          onUserUpdate(reg.user);
-        }
-      } catch (regErr) {
-        console.error('Auto register fallback failed', regErr);
-      }
+      console.warn('Role switch rejected by platform policy:', err);
     }
   };
 
@@ -351,7 +334,11 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
         {/* Notification bell button */}
         <div className="relative">
           <button
-            onClick={() => setShowNotif(!showNotif)}
+            onClick={() => {
+              const next = !showNotif;
+              setShowNotif(next);
+              if (next) fetchNotifs();
+            }}
             className="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors relative cursor-pointer active:scale-95 shadow-2xs"
             id="notif-btn"
             aria-label="Notifications"

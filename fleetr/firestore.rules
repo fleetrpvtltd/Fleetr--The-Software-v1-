@@ -7,7 +7,8 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == userId || request.auth.token.role == 'ADMIN');
     }
 
     match /deliveries/{deliveryId} {
@@ -57,10 +58,6 @@ service cloud.firestore {
 
     // Pre-computed aggregation metrics documents
     match /stats/{statId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /{document=**} {
       allow read, write: if isSignedIn();
     }
   }
