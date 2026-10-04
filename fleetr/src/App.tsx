@@ -532,7 +532,7 @@ export default function App() {
       ) : (
         <div className="w-full flex flex-col min-h-screen">
           <main className="flex-1">
-            <AuthPage onLoginSuccess={(u) => setUser(u)} />
+            <AuthPage onLoginSuccess={(u) => { saveLocalUser(u); setUser(u); }} />
           </main>
         </div>
       )}
