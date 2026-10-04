@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { apiRequest } from '../utils/api';
+import { apiRequest, saveLocalUser } from '../utils/api';
 import { User, UserRole, UserStatus } from '../types';
 import { KeyRound, Shield, Users, Package, Truck, Warehouse } from 'lucide-react';
 import { 
@@ -13,7 +13,7 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword 
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, limit, getDocs } from 'firebase/firestore';
 import { db, auth, sanitizeForFirestore } from '../lib/firebase';
 
 interface AuthPageProps {
@@ -53,10 +53,21 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     try {
       const userRef = doc(db, 'users', uid);
       const userSnap = await getDoc(userRef);
+      let profileData: User | null = null;
 
       if (userSnap.exists()) {
-        const profileData = userSnap.data() as User;
-        
+        profileData = userSnap.data() as User;
+      } else {
+        // Query by email in case record exists under different ID (e.g. usr_admin)
+        const q = query(collection(db, 'users'), where('email', '==', emailStr), limit(1));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          profileData = qSnap.docs[0].data() as User;
+          await setDoc(userRef, sanitizeForFirestore(profileData), { merge: true }).catch(() => {});
+        }
+      }
+
+      if (profileData) {
         // If master admin email, strictly lock role to ADMIN
         if (emailStr === 'emonpoddar01@gmail.com' || emailStr === 'nilavra.s2007@gmail.com') {
           profileData.role = 'ADMIN';
@@ -70,8 +81,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
         }
 
         // Sync profile state with Express backend
-        const syncResp = await apiRequest('/auth/register', 'POST', {
-          id: profileData.id,
+        await apiRequest('/auth/register', 'POST', {
+          id: profileData.id || uid,
           name: profileData.name,
           email: profileData.email,
           phone: profileData.phone,
@@ -79,24 +90,44 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
           gstin: profileData.gstin,
           companyName: profileData.organizationName,
           address: profileData.address
-        });
+        }).catch(() => {});
 
-        if (syncResp.success) {
-          setSuccessMsg('Session verified. Entering logistics pipeline...');
-          setTimeout(() => {
-            onLoginSuccess(profileData);
-          }, 1000);
-        }
-      } else {
-        // Need onboarding form registration
-        setOnboardUid(uid);
-        setOnboardEmail(emailStr);
-        if (fallbackName) {
-          setName(fallbackName);
-        }
-        setShowOnboarding(true);
-        setSuccessMsg('Authenticating success! Setup your operational profile to finalize registration.');
+        saveLocalUser(profileData);
+        setSuccessMsg('Session verified. Entering logistics pipeline...');
+        setTimeout(() => {
+          onLoginSuccess(profileData);
+        }, 500);
+        return;
       }
+
+      // If Master Admin email and not in Firestore yet, automatically initialize it
+      if (emailStr === 'emonpoddar01@gmail.com' || emailStr === 'nilavra.s2007@gmail.com') {
+        const adminProfile: User = {
+          id: uid,
+          name: fallbackName || 'Emon Poddar',
+          email: emailStr,
+          phone: '+919876543210',
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'users', uid), sanitizeForFirestore(adminProfile)).catch(() => {});
+        saveLocalUser(adminProfile);
+        setSuccessMsg('Admin session established. Entering workspace...');
+        setTimeout(() => {
+          onLoginSuccess(adminProfile);
+        }, 500);
+        return;
+      }
+
+      // Need onboarding form registration
+      setOnboardUid(uid);
+      setOnboardEmail(emailStr);
+      if (fallbackName) {
+        setName(fallbackName);
+      }
+      setShowOnboarding(true);
+      setSuccessMsg('Authenticating success! Setup your operational profile to finalize registration.');
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || 'Error occurred loading your user profile.');
@@ -114,14 +145,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
         const userCredential = await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
         const user = userCredential.user;
         await checkUserDocument(user.uid, user.email || loginEmail);
+        return;
       } catch (fbErr: any) {
-        // Fallback to backend authentication check
+        // Fallback to backend authentication check (e.g. Master Admin or Demo credentials)
         const apiResp = await apiRequest('/auth/login', 'POST', {
           email: loginEmail,
           password: loginPassword
         }).catch(() => null);
 
         if (apiResp?.success && apiResp.user) {
+          saveLocalUser(apiResp.user);
           setSuccessMsg('Session authenticated. Loading workspace...');
           setTimeout(() => {
             onLoginSuccess(apiResp.user);
