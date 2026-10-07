@@ -295,10 +295,6 @@ export default function App() {
                     <span className="text-slate-500">SARATHI DL:</span>
                     <span className="text-emerald-500 font-bold uppercase text-[9px]">Authorized</span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-400 bg-slate-800/20 p-2 rounded border border-slate-800/45">
-                    <span className="text-slate-500">FLEETR-MIND:</span>
-                    <span className="text-blue-400 font-bold uppercase text-[9px]">Active</span>
-                  </div>
                 </div>
               </div>
             </nav>
@@ -452,10 +448,6 @@ export default function App() {
                       <div className="flex items-center justify-between text-slate-400 bg-slate-800/30 p-2 rounded border border-slate-800/60">
                         <span className="text-slate-500">SARATHI DL:</span>
                         <span className="text-emerald-500 font-bold uppercase text-[9px]">Authorized</span>
-                      </div>
-                      <div className="flex items-center justify-between text-slate-400 bg-slate-800/30 p-2 rounded border border-slate-800/60">
-                        <span className="text-slate-500">FLEETR-MIND:</span>
-                        <span className="text-blue-400 font-bold uppercase text-[9px]">Active</span>
                       </div>
                     </div>
                   </div>
