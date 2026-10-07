@@ -95,32 +95,6 @@ This codebase is specifically engineered to operate within **100% Free-Tier cons
 
 ---
 
-## ⚙️ Environment Variables
-
-Create a `.env` file in the `fleetr/` directory (or configure these in your Render Dashboard):
-
-```env
-# Server Configuration
-PORT=3000
-NODE_ENV=production
-
-# Admin Credentials
-ADMIN_PASSWORD=your_secure_admin_password_here
-
-# Firebase Admin SDK Configuration
-# Option A: Path to service account JSON file
-FIREBASE_SERVICE_ACCOUNT_KEY=./serviceAccountKey.json
-
-# Option B: Raw or base64-encoded Service Account JSON (Recommended for Render)
-FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"..."}
-
-# Optional Integrations
-GEMINI_API_KEY=your_gemini_api_key_here
-ULIP_USERNAME=your_ulip_username
-ULIP_PASSWORD=your_ulip_password
-```
-
----
 
 ## 🚀 Local Development Quickstart
 
