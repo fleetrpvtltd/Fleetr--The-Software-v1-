@@ -352,57 +352,65 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
           </button>
 
           {showNotif && (
-            <div className="absolute right-0 mt-3 w-80 max-w-[calc(100vw-32px)] bg-white rounded-xl shadow-xl border border-slate-250 py-1.5 z-50 animate-in fade-in slide-in-from-top-3 max-h-96 overflow-y-auto">
-              <div className="px-4 py-2 border-b border-slate-150 flex justify-between items-center bg-slate-50">
-                <span className="text-xs font-mono font-bold text-slate-800 uppercase tracking-wide">Live Feed ({unreadCount})</span>
-                {unreadCount > 0 && (
-                  <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">Live</span>
-                )}
-              </div>
-              <div className="divide-y divide-slate-100">
-                {notifications.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-xs text-slate-400 font-mono">
-                    No active notifications
-                  </div>
-                ) : (
-                  notifications.map((not) => (
-                    <div
-                      key={not.id}
-                      className={`p-3 text-xs transition-colors hover:bg-slate-50 ${
-                        !not.read ? 'bg-blue-50/10 font-medium' : ''
-                      }`}
-                    >
-                      <div className="flex justify-between items-start gap-2">
-                        <span
-                          className={`font-semibold font-display ${
-                            not.type === 'ALERT'
-                              ? 'text-rose-600'
-                              : not.type === 'WARNING'
-                              ? 'text-amber-600'
-                              : 'text-slate-700'
-                          }`}
-                        >
-                          {not.title}
-                        </span>
-                        {!not.read && (
-                          <button
-                            onClick={() => markRead(not.id)}
-                            className="text-emerald-600 hover:text-emerald-800 p-0.5 bg-emerald-50 hover:bg-emerald-100 rounded cursor-pointer"
-                            title="Mark read"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-slate-500 mt-1 leading-relaxed text-[11px]">{not.message}</p>
-                      <span className="text-[9px] text-slate-400 block mt-1.5 font-mono">
-                        {new Date(not.createdAt).toLocaleTimeString()}
-                      </span>
+            <>
+              {/* Backdrop for closing notification on outside click */}
+              <div
+                className="fixed inset-0 z-40 bg-black/20 sm:bg-transparent"
+                onClick={() => setShowNotif(false)}
+                aria-hidden="true"
+              />
+              <div className="fixed left-3 right-3 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in slide-in-from-top-3 max-h-[80vh] sm:max-h-96 overflow-y-auto">
+                <div className="px-4 py-2 border-b border-slate-150 flex justify-between items-center bg-slate-50">
+                  <span className="text-xs font-mono font-bold text-slate-800 uppercase tracking-wide">Live Feed ({unreadCount})</span>
+                  {unreadCount > 0 && (
+                    <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">Live</span>
+                  )}
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {notifications.length === 0 ? (
+                    <div className="px-4 py-6 text-center text-xs text-slate-400 font-mono">
+                      No active notifications
                     </div>
-                  ))
-                )}
+                  ) : (
+                    notifications.map((not) => (
+                      <div
+                        key={not.id}
+                        className={`p-3 text-xs transition-colors hover:bg-slate-50 ${
+                          !not.read ? 'bg-blue-50/10 font-medium' : ''
+                        }`}
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <span
+                            className={`font-semibold font-display ${
+                              not.type === 'ALERT'
+                                ? 'text-rose-600'
+                                : not.type === 'WARNING'
+                                ? 'text-amber-600'
+                                : 'text-slate-700'
+                            }`}
+                          >
+                            {not.title}
+                          </span>
+                          {!not.read && (
+                            <button
+                              onClick={() => markRead(not.id)}
+                              className="text-emerald-600 hover:text-emerald-800 p-0.5 bg-emerald-50 hover:bg-emerald-100 rounded cursor-pointer"
+                              title="Mark read"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-slate-500 mt-1 leading-relaxed text-[11px]">{not.message}</p>
+                        <span className="text-[9px] text-slate-400 block mt-1.5 font-mono">
+                          {new Date(not.createdAt).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
+            </>
           )}
         </div>
 

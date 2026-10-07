@@ -532,29 +532,33 @@ export const BusinessDashboard: React.FC = () => {
       {activeTab === 'CREATE' && (
         <form onSubmit={handleCreateDelivery} className="bg-white p-4 sm:p-6 rounded-xl border border-slate-200 shadow-sm space-y-4 sm:space-y-6 max-w-4xl mx-auto animate-in fade-in duration-300">
           <div className="border-b border-slate-100 pb-3">
-            <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest font-display">Logistics Booking Request Formulation</h2>
-            <p className="text-xs text-slate-400 mt-1">Specify detailed payload metrics, consignor compliance parameters, and scheduling demands.</p>
+            <h2 className="text-sm sm:text-base font-bold text-slate-800 uppercase tracking-wide font-display break-words">
+              Logistics Booking Request Formulation
+            </h2>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+              Specify detailed payload metrics, consignor compliance parameters, and scheduling demands.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="col-span-2">
-              <label className="text-xs font-bold text-slate-700 block mb-1">Detailed Goods Description *</label>
+            <div className="col-span-1 md:col-span-2 min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Detailed Goods Description *</label>
               <textarea
                 value={goodsDescription}
                 onChange={(e) => setGoodsDescription(e.target.value)}
                 maxLength={500}
                 required
                 placeholder="Declare explicit goods type, quantity, fabric specifications, container counts, etc. (Max 500 chars)"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 h-20 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 h-24 resize-none focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Goods Category *</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Goods Category *</label>
               <select
                 value={goodsCategory}
                 onChange={(e) => setGoodsCategory(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               >
                 <option value="Textiles">Textiles & Garments</option>
                 <option value="Electrical Hardware">Electrical Hardware Instruments</option>
@@ -564,64 +568,65 @@ export const BusinessDashboard: React.FC = () => {
               </select>
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Goods Weight (Kg) *</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Goods Weight (Kg) *</label>
               <input
                 type="number"
                 step="any"
                 value={goodsWeightKg}
                 onChange={(e) => setGoodsWeightKg(e.target.value)}
                 required
-                placeholder="e.g. 8500 (Positive decimal, max 50000)"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                placeholder="e.g. 8500 (Max 50000)"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Volumetric Profile (Cubic Cm) *</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Volumetric Profile (Cubic Cm) *</label>
               <input
                 type="number"
                 value={goodsVolumeCubicCm}
                 onChange={(e) => setGoodsVolumeCubicCm(e.target.value)}
                 required
-                placeholder="e.g. 14000000 (Goods volume size metric)"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                placeholder="e.g. 14000000 (Goods volume size)"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Declared Goods Valuation (INR)</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Declared Goods Valuation (INR)</label>
               <input
                 type="number"
                 value={goodsValueInr}
                 onChange={(e) => setGoodsValueInr(e.target.value)}
-                placeholder="e.g. 1200000 (Valuations above 5,00,000 tag high value safe mode)"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                placeholder="e.g. 1200000 (> 5,00,000 tags high value)"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
               {Number(goodsValueInr) > 500000 && (
-                <span className="text-[10px] text-amber-600 block mt-1 font-semibold flex items-center gap-1">
-                  <AlertTriangle className="w-3.5 h-3.5" /> High-Value Cargo Warning flagged! Priority escort.
+                <span className="text-[10px] text-amber-600 mt-1.5 font-semibold flex items-start gap-1.5 leading-tight">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600 mt-0.5" />
+                  <span>High-Value Cargo Warning flagged! Priority escort.</span>
                 </span>
               )}
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Pickup Date (Tomorrow onwards) *</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Pickup Date (Tomorrow onwards) *</label>
               <input
                 type="date"
                 value={pickupDate}
                 onChange={(e) => setPickupDate(e.target.value)}
                 required
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Urgency Model level *</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Urgency Model level *</label>
               <select
                 value={urgencyLevel}
                 onChange={(e) => setUrgencyLevel(e.target.value as any)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               >
                 <option value="STANDARD">STANDARD Logistics Delivery</option>
                 <option value="EXPRESS">EXPRESS Delivery Route</option>
@@ -629,66 +634,67 @@ export const BusinessDashboard: React.FC = () => {
               </select>
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Pickup Location Address *</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Pickup Location Address *</label>
               <input
                 type="text"
                 value={pickupLocation}
                 onChange={(e) => setPickupLocation(e.target.value)}
                 required
                 placeholder="e.g. Okhla Phase 2, New Delhi"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Destination Location Address *</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Destination Location Address *</label>
               <input
                 type="text"
                 value={destinationLocation}
                 onChange={(e) => setDestinationLocation(e.target.value)}
                 required
                 placeholder="e.g. Sarkhej, Ahmedabad, Gujarat"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">E-Way Bill Number (Optional)</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">E-Way Bill Number (Optional)</label>
               <input
                 type="text"
                 value={ewayBillNo}
                 onChange={(e) => setEwayBillNo(e.target.value)}
                 placeholder="GST registered e-way bill ID"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">Consignor GSTIN Checklist *</label>
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Consignor GSTIN Checklist *</label>
               <input
                 type="text"
                 value={consignorGstin}
                 onChange={(e) => setConsignorGstin(e.target.value)}
                 placeholder="e.g. 07AAAAA1111A1Z1"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
           </div>
 
-          <div className="flex gap-3 sm:gap-4 justify-end pt-4 border-t border-slate-100 flex-wrap sm:flex-nowrap">
+          <div className="flex flex-col-reverse sm:flex-row gap-3 sm:gap-4 justify-end pt-4 border-t border-slate-100">
             <button
               type="button"
               onClick={() => setActiveTab('OVERVIEW')}
-              className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-5 py-2.5 min-h-[44px] rounded-lg uppercase tracking-wider transition-all active:scale-95 cursor-pointer inline-flex items-center justify-center"
+              className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-5 py-2.5 min-h-[44px] rounded-lg uppercase tracking-wider transition-all active:scale-95 cursor-pointer inline-flex items-center justify-center text-center"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-5 py-2.5 min-h-[44px] rounded-lg uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer shadow-xs"
+              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-5 py-2.5 min-h-[44px] rounded-lg uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer shadow-xs text-center"
             >
-              <PlusCircle className="w-4 h-4" /> Book Dispatched Cargo
+              <PlusCircle className="w-4 h-4 shrink-0" />
+              <span>Book Dispatched Cargo</span>
             </button>
           </div>
         </form>
