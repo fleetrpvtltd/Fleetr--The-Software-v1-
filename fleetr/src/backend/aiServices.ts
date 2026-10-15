@@ -38,7 +38,7 @@ export async function getOptimizedTrucks(deliveryId: string): Promise<RankedTruc
   if (!delivery) return [];
 
   const weight = delivery.goodsWeightKg;
-  const volume = delivery.goodsVolumeCubicCm;
+  const volume = delivery.goodsVolumeCubicCm || 0;
 
   return vehicles
     .map((veh) => {
@@ -53,9 +53,18 @@ export async function getOptimizedTrucks(deliveryId: string): Promise<RankedTruc
         explanations.push(`Payload capacity fits perfectly (${Math.round((weight / veh.capacityKg) * 100)}% weight utilization).`);
       }
 
-      if (veh.volumeCubicCm < volume) {
+      if (volume > 0 && veh.volumeCubicCm < volume) {
         score -= 40;
         explanations.push(`Cargo dimension exceeds volumetric footprint.`);
+      }
+
+      if (delivery.truckBodyType) {
+        const bodyKey = delivery.truckBodyType.toLowerCase().replace('_', ' ');
+        const vehType = (veh.vehicleType || '').toLowerCase();
+        if (vehType.includes(bodyKey) || (delivery.truckBodyType === 'OPEN_BODY' && vehType.includes('open')) || (delivery.truckBodyType === 'FLATBED' && vehType.includes('flat'))) {
+          score = Math.min(100, score + 10);
+          explanations.push(`Vehicle configuration matches requested ${delivery.truckBodyType.replace('_', ' ')} specification.`);
+        }
       }
 
       // Vahan verify deduction

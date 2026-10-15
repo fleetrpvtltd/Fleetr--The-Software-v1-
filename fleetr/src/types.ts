@@ -118,23 +118,27 @@ export interface Godown {
   handlingTimeHours: number;
 }
 
+export type TruckBodyType = 'OPEN_BODY' | 'CONTAINER' | 'FLATBED';
+
 export interface Delivery {
   id: string;
   customerId: string;
   goodsDescription: string;
   goodsCategory: string;
   goodsWeightKg: number;
-  goodsVolumeCubicCm: number;
-  goodsValueInr: number;
+  requiredTruckLengthFt?: number;
+  truckBodyType?: TruckBodyType;
+  goodsVolumeCubicCm?: number;
+  goodsValueInr?: number;
   pickupDate: string;
   pickupLocation: string;
   destinationLocation: string;
   intermediateGodownId?: string;
   specialInstructions?: string;
-  urgencyLevel: UrgencyLevel;
+  urgencyLevel?: UrgencyLevel;
   ewayBillNo?: string;
   consignorGstin: string;
-  consigneeGstin: string;
+  consigneeGstin?: string;
   status: DeliveryStatus;
   createdAt: string;
   deliveredAt?: string;

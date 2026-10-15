@@ -47,14 +47,12 @@ export const BusinessDashboard: React.FC = () => {
   const [goodsDescription, setGoodsDescription] = useState('');
   const [goodsCategory, setGoodsCategory] = useState('Textiles');
   const [goodsWeightKg, setGoodsWeightKg] = useState('');
-  const [goodsVolumeCubicCm, setGoodsVolumeCubicCm] = useState('');
-  const [goodsValueInr, setGoodsValueInr] = useState('');
+  const [requiredTruckLengthFt, setRequiredTruckLengthFt] = useState('');
+  const [truckBodyType, setTruckBodyType] = useState<'OPEN_BODY' | 'CONTAINER' | 'FLATBED'>('OPEN_BODY');
   const [pickupDate, setPickupDate] = useState('');
   const [pickupLocation, setPickupLocation] = useState('');
   const [destinationLocation, setDestinationLocation] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
-  const [urgencyLevel, setUrgencyLevel] = useState<'STANDARD' | 'EXPRESS' | 'SAME_DAY'>('STANDARD');
-  const [ewayBillNo, setEwayBillNo] = useState('');
   const [consignorGstin, setConsignorGstin] = useState('');
   const [consigneeGstin, setConsigneeGstin] = useState('');
   
@@ -170,13 +168,17 @@ export const BusinessDashboard: React.FC = () => {
       return;
     }
     const weightNum = Number(goodsWeightKg);
-    const volumeNum = Number(goodsVolumeCubicCm);
     if (!weightNum || weightNum <= 0 || weightNum > 50000) {
       setErrorMsg('Consignment Weight must be a positive decimal below 50,000 kg.');
       return;
     }
-    if (!volumeNum || volumeNum <= 0) {
-      setErrorMsg('Volumetric profile must be a positive decimal.');
+    const truckLengthNum = Number(requiredTruckLengthFt);
+    if (!truckLengthNum || truckLengthNum <= 0 || truckLengthNum > 100) {
+      setErrorMsg('Please specify a valid required truck length in feet (e.g. 14, 20, 24, 32).');
+      return;
+    }
+    if (!consignorGstin.trim()) {
+      setErrorMsg('Please specify a valid GST Number.');
       return;
     }
 
@@ -195,16 +197,14 @@ export const BusinessDashboard: React.FC = () => {
         goodsDescription,
         goodsCategory,
         goodsWeightKg: weightNum,
-        goodsVolumeCubicCm: volumeNum,
-        goodsValueInr: Number(goodsValueInr) || 100000,
+        requiredTruckLengthFt: truckLengthNum,
+        truckBodyType,
         pickupDate,
         pickupLocation,
         destinationLocation,
         specialInstructions,
-        urgencyLevel,
-        ewayBillNo,
-        consignorGstin,
-        consigneeGstin
+        consignorGstin: consignorGstin.trim(),
+        consigneeGstin: consigneeGstin.trim()
       });
 
       if (resp.delivery) {
@@ -212,13 +212,14 @@ export const BusinessDashboard: React.FC = () => {
         // Reset states
         setGoodsDescription('');
         setGoodsWeightKg('');
-        setGoodsVolumeCubicCm('');
-        setGoodsValueInr('');
+        setRequiredTruckLengthFt('');
+        setTruckBodyType('OPEN_BODY');
         setPickupDate('');
         setPickupLocation('');
         setDestinationLocation('');
         setSpecialInstructions('');
-        setEwayBillNo('');
+        setConsignorGstin('');
+        setConsigneeGstin('');
         fetchData();
         setActiveTab('OVERVIEW');
       }
@@ -464,7 +465,7 @@ export const BusinessDashboard: React.FC = () => {
                     <tr>
                       <th className="px-5 py-3">Consignment ID</th>
                       <th className="px-5 py-3">Goods</th>
-                      <th className="px-5 py-3">Urgency</th>
+                      <th className="px-5 py-3">Truck Spec</th>
                       <th className="px-5 py-3">Weight (KG)</th>
                       <th className="px-5 py-3">Route Log</th>
                       <th className="px-5 py-3">Status Badge</th>
@@ -480,8 +481,10 @@ export const BusinessDashboard: React.FC = () => {
                           <span className="text-[10px] text-slate-400 block mt-0.5">{del.goodsCategory}</span>
                         </td>
                         <td className="px-5 py-3.5">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${del.urgencyLevel === 'SAME_DAY' ? 'bg-rose-50 text-rose-600 border border-rose-100' : del.urgencyLevel === 'EXPRESS' ? 'bg-amber-50 text-amber-600 border border-amber-100' : 'bg-slate-100 text-slate-600'}`}>
-                            {del.urgencyLevel}
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 font-mono">
+                            {del.truckBodyType
+                              ? `${del.requiredTruckLengthFt ? `${del.requiredTruckLengthFt}ft ` : ''}${del.truckBodyType.replace('_', ' ')}`
+                              : del.urgencyLevel || 'STANDARD'}
                           </span>
                         </td>
                         <td className="px-5 py-3.5 font-medium">{del.goodsWeightKg} kg</td>
@@ -536,7 +539,7 @@ export const BusinessDashboard: React.FC = () => {
               Logistics Booking Request Formulation
             </h2>
             <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              Specify detailed payload metrics, consignor compliance parameters, and scheduling demands.
+              Specify goods payload weight, required truck dimensions, body type, and consignor GST parameters.
             </p>
           </div>
 
@@ -548,7 +551,7 @@ export const BusinessDashboard: React.FC = () => {
                 onChange={(e) => setGoodsDescription(e.target.value)}
                 maxLength={500}
                 required
-                placeholder="Declare explicit goods type, quantity, fabric specifications, container counts, etc. (Max 500 chars)"
+                placeholder="Declare explicit goods type, quantity, specifications, container counts, etc. (Max 500 chars)"
                 className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 h-24 resize-none focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
@@ -582,32 +585,43 @@ export const BusinessDashboard: React.FC = () => {
             </div>
 
             <div className="min-w-0">
-              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Volumetric Profile (Cubic Cm) *</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Required Truck Length in ft *</label>
               <input
                 type="number"
-                value={goodsVolumeCubicCm}
-                onChange={(e) => setGoodsVolumeCubicCm(e.target.value)}
+                step="any"
+                min="1"
+                max="100"
+                value={requiredTruckLengthFt}
+                onChange={(e) => setRequiredTruckLengthFt(e.target.value)}
                 required
-                placeholder="e.g. 14000000 (Goods volume size)"
+                placeholder="e.g. 14, 20, 24, 32 (Length in feet)"
                 className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>
 
             <div className="min-w-0">
-              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Declared Goods Valuation (INR)</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Truck Body Type (Option) *</label>
+              <select
+                value={truckBodyType}
+                onChange={(e) => setTruckBodyType(e.target.value as any)}
+                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+              >
+                <option value="OPEN_BODY">Open Body</option>
+                <option value="CONTAINER">Container</option>
+                <option value="FLATBED">Flat Bed</option>
+              </select>
+            </div>
+
+            <div className="min-w-0">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">GST Number (Consignor GSTIN) *</label>
               <input
-                type="number"
-                value={goodsValueInr}
-                onChange={(e) => setGoodsValueInr(e.target.value)}
-                placeholder="e.g. 1200000 (> 5,00,000 tags high value)"
+                type="text"
+                value={consignorGstin}
+                onChange={(e) => setConsignorGstin(e.target.value)}
+                required
+                placeholder="e.g. 07AAAAA1111A1Z1"
                 className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
-              {Number(goodsValueInr) > 500000 && (
-                <span className="text-[10px] text-amber-600 mt-1.5 font-semibold flex items-start gap-1.5 leading-tight">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600 mt-0.5" />
-                  <span>High-Value Cargo Warning flagged! Priority escort.</span>
-                </span>
-              )}
             </div>
 
             <div className="min-w-0">
@@ -619,19 +633,6 @@ export const BusinessDashboard: React.FC = () => {
                 required
                 className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
-            </div>
-
-            <div className="min-w-0">
-              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Urgency Model level *</label>
-              <select
-                value={urgencyLevel}
-                onChange={(e) => setUrgencyLevel(e.target.value as any)}
-                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
-              >
-                <option value="STANDARD">STANDARD Logistics Delivery</option>
-                <option value="EXPRESS">EXPRESS Delivery Route</option>
-                <option value="SAME_DAY">SAME-DAY Express priority dispatch</option>
-              </select>
             </div>
 
             <div className="min-w-0">
@@ -654,28 +655,6 @@ export const BusinessDashboard: React.FC = () => {
                 onChange={(e) => setDestinationLocation(e.target.value)}
                 required
                 placeholder="e.g. Sarkhej, Ahmedabad, Gujarat"
-                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
-              />
-            </div>
-
-            <div className="min-w-0">
-              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">E-Way Bill Number (Optional)</label>
-              <input
-                type="text"
-                value={ewayBillNo}
-                onChange={(e) => setEwayBillNo(e.target.value)}
-                placeholder="GST registered e-way bill ID"
-                className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
-              />
-            </div>
-
-            <div className="min-w-0">
-              <label className="text-xs font-bold text-slate-700 block mb-1.5 text-left">Consignor GSTIN Checklist *</label>
-              <input
-                type="text"
-                value={consignorGstin}
-                onChange={(e) => setConsignorGstin(e.target.value)}
-                placeholder="e.g. 07AAAAA1111A1Z1"
                 className="w-full min-w-0 box-border bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
               />
             </div>

@@ -554,8 +554,14 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
                       <span className="text-slate-700 font-bold">{selectedItem.data.goodsWeightKg?.toLocaleString()} kg</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Est. Goods Value</span>
-                      <span className="text-slate-700 font-bold">₹{selectedItem.data.goodsValueInr?.toLocaleString()}</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                        {selectedItem.data.truckBodyType ? 'Required Truck Spec' : 'Est. Goods Value'}
+                      </span>
+                      <span className="text-slate-700 font-bold">
+                        {selectedItem.data.truckBodyType
+                          ? `${selectedItem.data.requiredTruckLengthFt ? `${selectedItem.data.requiredTruckLengthFt}ft ` : ''}${selectedItem.data.truckBodyType.replace('_', ' ')}`
+                          : (selectedItem.data.goodsValueInr ? `₹${selectedItem.data.goodsValueInr.toLocaleString()}` : 'Standard')}
+                      </span>
                     </div>
                   </div>
 
