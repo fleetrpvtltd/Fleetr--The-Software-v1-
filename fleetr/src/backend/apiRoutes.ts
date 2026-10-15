@@ -825,6 +825,7 @@ apiRouter.post('/deliveries', checkRole(['BUSINESS_OWNER', 'ADMIN']), async (req
     userId: customerId,
     title: 'Consignment Created',
     message: `Delivery consignment ${newDel.id} registered with route ${tariff.distanceKm} km. E-way bill ${newDel.ewayBillNo} verified.`,
+    targetRole: 'BUSINESS_OWNER',
     type: 'SUCCESS',
     read: false,
     createdAt: new Date().toISOString()
@@ -834,6 +835,7 @@ apiRouter.post('/deliveries', checkRole(['BUSINESS_OWNER', 'ADMIN']), async (req
   await dbService.createNotification({
     id: `not_admin_${Date.now()}`,
     userId: 'usr_admin',
+    targetRole: 'ADMIN',
     title: 'New Freight Booking',
     message: `Consignment ${newDel.id} queued: ${pickupLocation} to ${destinationLocation} (${tariff.distanceKm} km).`,
     type: 'WARNING',
@@ -899,6 +901,7 @@ apiRouter.patch('/deliveries/:id/status', async (req: Request, res: Response) =>
   const customerNot: Notification = {
     id: `not_state_${Date.now()}`,
     userId: del.customerId,
+    targetRole: 'BUSINESS_OWNER',
     title: `Consignment Status: ${status}`,
     message: `Your transport consignment ${del.id} milestone tracking state is now: ${status}`,
     type: status === 'DELIVERED' ? 'SUCCESS' : 'INFO',
@@ -906,6 +909,22 @@ apiRouter.patch('/deliveries/:id/status', async (req: Request, res: Response) =>
     createdAt: new Date().toISOString()
   };
   await dbService.createNotification(customerNot);
+
+  if (del.assignedVehicleId) {
+    const veh = await dbService.getVehicle(del.assignedVehicleId);
+    if (veh && veh.ownerId && veh.ownerId !== del.customerId) {
+      await dbService.createNotification({
+        id: `not_carrier_status_${Date.now()}`,
+        userId: veh.ownerId,
+        targetRole: 'TRUCK_OWNER',
+        title: `Trip Status Update: ${status}`,
+        message: `Consignment ${del.id} assigned to your vehicle ${veh.vehicleNumber} is now: ${status}`,
+        type: status === 'DELIVERED' ? 'SUCCESS' : 'INFO',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
+    }
+  }
 
   res.json({ success: true, delivery: del });
 });
@@ -921,6 +940,7 @@ apiRouter.post('/deliveries/:id/request-payment', checkRole(['ADMIN']), async (r
   const pmtNot: Notification = {
     id: `not_pmt_${Date.now()}`,
     userId: del.customerId,
+    targetRole: 'BUSINESS_OWNER',
     title: 'Payment Invoice Surcharge Alert',
     message: `Delivery consignment ${del.id} is approved! Complete Razorpay payment to trigger transport operations.`,
     type: 'WARNING',
@@ -950,6 +970,35 @@ apiRouter.post('/assignments/:deliveryId/assign-truck', checkRole(['ADMIN']), as
   try {
     const result = await dbService.assignDeliveryTruckTx(req.params.deliveryId, vehicleId, driverId);
     await logAction(req, 'TRUCK_ASSIGN', `Assigned vehicle ${vehicleId} / driver ${driverId} to freight trip ${req.params.deliveryId}`);
+
+    if (result.delivery.customerId) {
+      const veh = await dbService.getVehicle(vehicleId);
+      const drv = await dbService.getDriver(driverId);
+      await dbService.createNotification({
+        id: `not_truck_assigned_cust_${Date.now()}`,
+        userId: result.delivery.customerId,
+        targetRole: 'BUSINESS_OWNER',
+        title: 'Carrier Asset Assigned',
+        message: `Truck ${veh?.vehicleNumber || vehicleId} and driver ${drv?.name || driverId} assigned to consignment ${result.delivery.id}.`,
+        type: 'INFO',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
+
+      if (veh?.ownerId && veh.ownerId !== result.delivery.customerId) {
+        await dbService.createNotification({
+          id: `not_truck_assigned_carrier_${Date.now()}`,
+          userId: veh.ownerId,
+          targetRole: 'TRUCK_OWNER',
+          title: 'New Trip Assigned',
+          message: `Your vehicle ${veh.vehicleNumber} has been assigned for consignment ${result.delivery.id} (${result.delivery.pickupLocation} ➔ ${result.delivery.destinationLocation}).`,
+          type: 'SUCCESS',
+          read: false,
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
+
     res.json({ success: true, delivery: result.delivery, assignment: result.assignment });
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Truck assignment transaction failed.' });
@@ -965,6 +1014,33 @@ apiRouter.post('/assignments/:deliveryId/assign-godown', checkRole(['ADMIN']), a
   try {
     const result = await dbService.assignGodownCapacityTx(req.params.deliveryId, godownId);
     await logAction(req, 'GODOWN_ASSIGN', `Routed freight trip ${req.params.deliveryId} via staging point ${godownId}`);
+
+    if (result.delivery.customerId) {
+      await dbService.createNotification({
+        id: `not_godown_assigned_cust_${Date.now()}`,
+        userId: result.delivery.customerId,
+        targetRole: 'BUSINESS_OWNER',
+        title: 'Warehouse Staging Allocated',
+        message: `Consignment ${result.delivery.id} routed via staging facility ${result.godown.name}.`,
+        type: 'INFO',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    if (result.godown.ownerId && result.godown.ownerId !== result.delivery.customerId) {
+      await dbService.createNotification({
+        id: `not_godown_assigned_owner_${Date.now()}`,
+        userId: result.godown.ownerId,
+        targetRole: 'GODOWN_OWNER',
+        title: 'Cargo Inbound Reserved',
+        message: `Staging space allocated at ${result.godown.name} for consignment ${result.delivery.id} (${result.delivery.goodsWeightKg} kg).`,
+        type: 'INFO',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
+    }
+
     res.json({ success: true, delivery: result.delivery, godown: result.godown });
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Warehouse capacity assignment transaction failed.' });
@@ -1042,6 +1118,30 @@ const handlePaymentCapture = async (req: Request, res: Response) => {
   };
   await dbService.createInvoice(newInv);
 
+  const del = await dbService.getDelivery(payment.deliveryId);
+  if (del && del.customerId) {
+    await dbService.createNotification({
+      id: `not_pmt_captured_${Date.now()}`,
+      userId: del.customerId,
+      targetRole: 'BUSINESS_OWNER',
+      title: 'Payment Confirmed',
+      message: `Payment of ₹${payment.totalAmount} for consignment ${del.id} verified. Shipment is now CONFIRMED.`,
+      type: 'SUCCESS',
+      read: false,
+      createdAt: paidAt
+    });
+    await dbService.createNotification({
+      id: `not_admin_pmt_${Date.now()}`,
+      userId: 'usr_admin',
+      targetRole: 'ADMIN',
+      title: 'Freight Payment Captured',
+      message: `Payment of ₹${payment.totalAmount} captured for consignment ${del.id}. Ready for dispatch.`,
+      type: 'INFO',
+      read: false,
+      createdAt: paidAt
+    });
+  }
+
   await logAction(req, 'PAYMENT_CAPTURE', `Confirmed receipt of cargo freight bills for shipment ${payment.deliveryId} (₹${payment.totalAmount})`);
 
   res.json({ success: true, payment, invoice: newInv });
@@ -1117,11 +1217,22 @@ LR CHECKPAY STATUS: CAPTURED (Razorpay Verified)
 
 // ---------------- NOTIFICATIONS ----------------
 apiRouter.get('/notifications', async (req: Request, res: Response) => {
-  const user = await getCurrentUser(req);
-  if (!user) {
+  let user = await getCurrentUser(req);
+  const queryUserId = req.query.userId as string;
+  const queryRole = req.query.role as string;
+
+  if (!user && queryUserId) {
+    user = await dbService.getUser(queryUserId);
+  }
+
+  if (!user && !queryUserId) {
     return res.json({ notifications: [] });
   }
-  const notifications = await dbService.getNotifications(user.id);
+
+  const effectiveUserId = user?.id || queryUserId;
+  const effectiveRole = user?.role || queryRole;
+
+  const notifications = await dbService.getNotifications(effectiveUserId, effectiveRole);
   res.json({ notifications });
 });
 
@@ -1399,6 +1510,19 @@ apiRouter.post('/support/tickets', async (req: Request, res: Response) => {
 
   await dbService.createSupportTicket(ticket);
   await logAction(req, 'SUPPORT_TICKET_RAISE', `Support ticket ${ticket.id} (${ticket.category}) opened by ${user.name}`);
+
+  // Notify Master Admin of new support ticket
+  await dbService.createNotification({
+    id: `not_tkt_admin_${Date.now()}`,
+    userId: 'usr_admin',
+    targetRole: 'ADMIN',
+    title: `New Support Ticket [${ticket.priority}]`,
+    message: `${user.name} (${user.role}) opened ticket "${ticket.subject}"`,
+    type: ticket.priority === 'CRITICAL' ? 'ALERT' : 'INFO',
+    read: false,
+    createdAt: new Date().toISOString()
+  });
+
   res.json({ success: true, ticket });
 });
 
@@ -1415,6 +1539,8 @@ apiRouter.patch('/support/tickets/:id', async (req: Request, res: Response) => {
   const user = await getCurrentUser(req);
   if (!user) return res.status(401).json({ error: 'UNAUTHORIZED' });
 
+  const existingTicket = await dbService.getSupportTicket(req.params.id);
+
   const { status, adminNotes } = req.body;
   const updates: Partial<SupportTicket> = {};
   if (status) updates.status = status;
@@ -1425,5 +1551,19 @@ apiRouter.patch('/support/tickets/:id', async (req: Request, res: Response) => {
 
   await dbService.updateSupportTicket(req.params.id, updates);
   await logAction(req, 'SUPPORT_TICKET_UPDATE', `Ticket ${req.params.id} updated by ${user.name} to status ${status}`);
+
+  if (existingTicket && status && existingTicket.raisedBy) {
+    await dbService.createNotification({
+      id: `not_tkt_user_${Date.now()}`,
+      userId: existingTicket.raisedBy,
+      targetRole: existingTicket.raisedByRole,
+      title: `Support Ticket Updated: ${status}`,
+      message: `Your ticket "${existingTicket.subject}" status is now ${status}.${adminNotes ? ` Note: ${adminNotes}` : ''}`,
+      type: status === 'RESOLVED' ? 'SUCCESS' : 'INFO',
+      read: false,
+      createdAt: new Date().toISOString()
+    });
+  }
+
   res.json({ success: true });
 });

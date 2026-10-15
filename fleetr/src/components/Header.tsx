@@ -79,7 +79,10 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
 
   const fetchNotifs = async () => {
     try {
-      const data = await apiRequest('/notifications');
+      const endpoint = user
+        ? `/notifications?userId=${encodeURIComponent(user.id)}&role=${encodeURIComponent(user.role)}`
+        : '/notifications';
+      const data = await apiRequest(endpoint);
       setNotifications(data.notifications || []);
     } catch (err) {
       console.error(err);
@@ -87,8 +90,9 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
   };
 
   useEffect(() => {
+    setNotifications([]);
     fetchNotifs();
-  }, [user]);
+  }, [user?.id, user?.role]);
 
   const switchRole = async (targetRole: UserRole) => {
     try {
@@ -111,7 +115,16 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const visibleNotifications = notifications.filter((n) => {
+    if (!user) return false;
+    const isAdmin = user.role === 'ADMIN' || user.id === 'usr_admin';
+    if (isAdmin) {
+      return n.userId === user.id || n.userId === 'usr_admin' || n.targetRole === 'ADMIN';
+    }
+    return (n.userId === user.id && n.userId !== 'usr_admin') || (Boolean(user.role) && n.targetRole === user.role);
+  });
+
+  const unreadCount = visibleNotifications.filter((n) => !n.read).length;
 
   return (
     <header className="bg-white border-b border-slate-200 h-14 sm:h-16 px-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
@@ -361,18 +374,25 @@ export const Header: React.FC<HeaderProps> = ({ user, onUserUpdate, utcTime, onL
               />
               <div className="fixed left-3 right-3 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in slide-in-from-top-3 max-h-[80vh] sm:max-h-96 overflow-y-auto">
                 <div className="px-4 py-2 border-b border-slate-150 flex justify-between items-center bg-slate-50">
-                  <span className="text-xs font-mono font-bold text-slate-800 uppercase tracking-wide">Live Feed ({unreadCount})</span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs font-mono font-bold text-slate-800 uppercase tracking-wide">Live Feed ({unreadCount})</span>
+                    {user?.role && (
+                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 uppercase shrink-0">
+                        {user.role === 'ADMIN' ? 'Admin' : user.role === 'BUSINESS_OWNER' ? 'Business' : user.role === 'TRUCK_OWNER' ? 'Carrier' : 'Godown'}
+                      </span>
+                    )}
+                  </div>
                   {unreadCount > 0 && (
                     <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">Live</span>
                   )}
                 </div>
                 <div className="divide-y divide-slate-100">
-                  {notifications.length === 0 ? (
+                  {visibleNotifications.length === 0 ? (
                     <div className="px-4 py-6 text-center text-xs text-slate-400 font-mono">
                       No active notifications
                     </div>
                   ) : (
-                    notifications.map((not) => (
+                    visibleNotifications.map((not) => (
                       <div
                         key={not.id}
                         className={`p-3 text-xs transition-colors hover:bg-slate-50 ${

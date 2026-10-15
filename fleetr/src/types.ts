@@ -185,6 +185,7 @@ export interface Invoice {
 export interface Notification {
   id: string;
   userId: string;
+  targetRole?: UserRole;
   title: string;
   message: string;
   type: 'INFO' | 'SUCCESS' | 'WARNING' | 'ALERT';

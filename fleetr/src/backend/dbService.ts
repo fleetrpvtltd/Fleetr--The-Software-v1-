@@ -757,13 +757,21 @@ export class DbService {
   }
 
   // ---------------- NOTIFICATIONS (DIRECT FIRESTORE SDK) ----------------
-  async getNotifications(userId?: string): Promise<Notification[]> {
+  async getNotifications(userId?: string, userRole?: string): Promise<Notification[]> {
     try {
+      if (!userId) return [];
       const snap = await getDocs(collection(db, 'notifications'));
       let list = snap.docs.map((d) => d.data() as Notification);
-      if (userId) {
-        list = list.filter((n) => n.userId === userId || n.userId === 'usr_admin');
+
+      const isAdmin = userRole === 'ADMIN' || userId === 'usr_admin';
+      if (isAdmin) {
+        // Admin sees notifications directed to admin or their specific admin user id
+        list = list.filter((n) => n.userId === userId || n.userId === 'usr_admin' || n.targetRole === 'ADMIN');
+      } else {
+        // Strict segregation: normal users only receive notifications intended specifically for them or their role
+        list = list.filter((n) => (n.userId === userId && n.userId !== 'usr_admin') || (Boolean(userRole) && n.targetRole === userRole));
       }
+
       return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch (err) {
       console.error('getNotifications error:', err);
@@ -1023,6 +1031,17 @@ export class DbService {
       this.statsCache = null; // Invalidate stats cache
     }
     return ticket;
+  }
+
+  async getSupportTicket(id: string): Promise<SupportTicket | null> {
+    try {
+      const snap = await getDoc(doc(db, 'supportTickets', id));
+      if (!snap.exists()) return null;
+      return snap.data() as SupportTicket;
+    } catch (err) {
+      console.error(`getSupportTicket(${id}) error:`, err);
+      return null;
+    }
   }
 
   async getSupportTickets(filter?: { raisedBy?: string; status?: string }): Promise<SupportTicket[]> {
