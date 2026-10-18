@@ -34,7 +34,8 @@ import {
   CreditCard,
   Layers,
   HelpCircle,
-  PhoneCall
+  PhoneCall,
+  X
 } from 'lucide-react';
 
 export const TruckOwnerDashboard: React.FC = () => {
@@ -272,6 +273,34 @@ export const TruckOwnerDashboard: React.FC = () => {
       fetchData();
     } catch (err: any) {
       setError(err.message);
+    }
+  };
+
+  const handleAcceptTruckRequest = async (deliveryId: string) => {
+    try {
+      setActionLoading((prev) => ({ ...prev, [`accept_${deliveryId}`]: true }));
+      setError('');
+      await apiRequest(`/assignments/${deliveryId}/carrier-accept`, 'POST');
+      setSuccess(`Truck booking request accepted for consignment ${deliveryId}! The vehicle is now locked for this route.`);
+      await fetchData();
+    } catch (err: any) {
+      setError(err.message || 'Failed to accept truck request.');
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`accept_${deliveryId}`]: false }));
+    }
+  };
+
+  const handleDeclineTruckRequest = async (deliveryId: string) => {
+    try {
+      setActionLoading((prev) => ({ ...prev, [`decline_${deliveryId}`]: true }));
+      setError('');
+      await apiRequest(`/assignments/${deliveryId}/carrier-reject`, 'POST');
+      setSuccess(`Truck booking request declined for consignment ${deliveryId}. The truck has been released back to available fleet.`);
+      await fetchData();
+    } catch (err: any) {
+      setError(err.message || 'Failed to decline truck request.');
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`decline_${deliveryId}`]: false }));
     }
   };
 
@@ -1343,6 +1372,9 @@ Proceed to the loading bay and tap 'Location Reached' upon cargo load arrival.`;
     );
   }
 
+  const pendingTruckRequests = assignments.filter((d) => d.truckAssignmentStatus === 'PENDING');
+  const activeTrips = assignments.filter((d) => d.truckAssignmentStatus !== 'PENDING' && d.truckAssignmentStatus !== 'REJECTED');
+
   return (
     <div className="p-3 sm:p-5 lg:p-8 max-w-7xl mx-auto space-y-4 sm:space-y-6">
       {/* Segmented Navigation tabs */}
@@ -1361,11 +1393,42 @@ Proceed to the loading bay and tap 'Location Reached' upon cargo load arrival.`;
         </button>
         <button
           onClick={() => setActiveTab('ASSIGNMENTS')}
-          className={`px-3.5 sm:px-4 py-2 min-h-[40px] text-xs font-mono font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap inline-flex items-center justify-center ${activeTab === 'ASSIGNMENTS' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`px-3.5 sm:px-4 py-2 min-h-[40px] text-xs font-mono font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 justify-center ${activeTab === 'ASSIGNMENTS' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Assignments ({assignments.length})
+          <span>Assignments</span>
+          {pendingTruckRequests.length > 0 ? (
+            <span className="bg-amber-500 text-white text-[9px] px-1.5 py-0.5 rounded-full font-black animate-pulse">
+              {pendingTruckRequests.length} PENDING
+            </span>
+          ) : (
+            <span className="text-slate-400">({activeTrips.length})</span>
+          )}
         </button>
       </div>
+
+      {pendingTruckRequests.length > 0 && activeTab !== 'ASSIGNMENTS' && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 text-amber-700 rounded-lg shrink-0">
+              <Truck className="w-5 h-5 animate-bounce" />
+            </div>
+            <div>
+              <h4 className="text-xs font-extrabold text-amber-950 uppercase tracking-wider">
+                Action Required: {pendingTruckRequests.length} Truck Booking Request{pendingTruckRequests.length > 1 ? 's' : ''} Received
+              </h4>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                Admin has requested specific vehicles from your fleet for freight routing. Review and confirm availability.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('ASSIGNMENTS')}
+            className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-2 min-h-[38px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer whitespace-nowrap shadow-xs inline-flex items-center justify-center self-start sm:self-auto"
+          >
+            Review Requests ➔
+          </button>
+        </div>
+      )}
 
       {success && (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl flex items-center gap-3 animate-in slide-in-from-top-3">
@@ -1782,56 +1845,179 @@ Proceed to the loading bay and tap 'Location Reached' upon cargo load arrival.`;
         loading ? (
           <GridCardSkeleton count={4} title="Carrier Trip Assigned Workspace" />
         ) : (
-        <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200 shadow-sm space-y-4 animate-in fade-in duration-300">
-          <div className="border-b border-slate-100 pb-2 flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display">Carrier Trip Assigned Workspace</h3>
-            <span className="text-[10px] text-slate-400 font-mono">TRACKING SYNC OK</span>
-          </div>
-
-          {assignments.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 text-xs">
-              No active deliveries are assigned to your carrier fleet yet. Manage bookings on admin workstation panel.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {assignments.map((del) => (
-                <div key={del.id} className="border border-slate-200 rounded-xl p-4 space-y-3 shadow-sm hover:border-slate-300 transition-all">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="text-[10px] font-mono text-slate-400 block font-semibold">SHIPMENT ID: {del.id}</span>
-                      <h4 className="text-xs font-extrabold text-slate-800 mt-0.5">{del.goodsDescription}</h4>
-                    </div>
-                    <span className="font-mono text-[9px] font-extrabold bg-slate-900 text-white px-2 py-0.5 rounded border">
-                      {del.status}
-                    </span>
-                  </div>
-
-                  <div className="bg-slate-50 rounded-lg p-2.5 text-[10px] space-y-1 text-slate-600 font-medium">
-                    <div className="flex justify-between">
-                      <span>Consignment Weight:</span>
-                      <span className="font-bold text-slate-800">{del.goodsWeightKg} kg</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Route Waypoints:</span>
-                      <span className="font-bold text-slate-800">{del.pickupLocation} ➔ {del.destinationLocation}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center pt-2">
-                    <span className="text-[9px] text-slate-400 font-mono">GPS tracking sync active</span>
-                    {['CONFIRMED', 'DISPATCHED', 'IN_TRANSIT'].includes(del.status) && (
-                      <button
-                        onClick={() => handleTripProgress(del.id, del.status)}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 min-h-[40px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-xs inline-flex items-center justify-center"
-                      >
-                        {del.status === 'CONFIRMED' ? 'Start Dispatch' : del.status === 'DISPATCHED' ? 'Mark In Transit' : 'Mark Delivered'}
-                      </button>
-                    )}
-                  </div>
+        <div className="space-y-6 animate-in fade-in duration-300">
+          {/* PENDING SPECIFIC TRUCK BOOKING REQUESTS */}
+          {pendingTruckRequests.length > 0 && (
+            <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-amber-200 shadow-sm space-y-4">
+              <div className="border-b border-amber-100 pb-2.5 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-amber-500 animate-ping" />
+                  <h3 className="text-xs font-bold text-amber-900 uppercase tracking-widest font-display">
+                    Incoming Truck Booking Requests ({pendingTruckRequests.length})
+                  </h3>
                 </div>
-              ))}
+                <span className="text-[10px] font-mono text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-200 font-bold uppercase">
+                  Action Required
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {pendingTruckRequests.map((del) => {
+                  const requestedVehicle = vehicles.find((v) => v.id === del.assignedVehicleId);
+                  const isAccepting = actionLoading[`accept_${del.id}`];
+                  const isDeclining = actionLoading[`decline_${del.id}`];
+
+                  return (
+                    <div key={del.id} className="border-2 border-amber-300 bg-amber-50/20 rounded-xl p-4 space-y-3.5 shadow-xs hover:border-amber-400 transition-all">
+                      <div className="flex justify-between items-start gap-2">
+                        <div>
+                          <span className="text-[10px] font-mono text-amber-700 font-bold block">SHIPMENT: {del.id}</span>
+                          <h4 className="text-xs font-extrabold text-slate-900 mt-0.5">{del.goodsDescription}</h4>
+                          <span className="text-[10px] text-slate-500">{del.goodsCategory}</span>
+                        </div>
+                        <span className="font-mono text-[9px] font-extrabold bg-amber-500 text-white px-2 py-0.5 rounded uppercase tracking-wider">
+                          Pending Approval
+                        </span>
+                      </div>
+
+                      {/* Explicit Specific Truck Details Card */}
+                      <div className="bg-white rounded-lg p-3 border border-amber-200/80 space-y-2">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                          <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5">
+                            <Truck className="w-3.5 h-3.5 text-indigo-600" />
+                            Specific Truck Requested:
+                          </span>
+                          <span className="text-xs font-mono font-black text-slate-900">
+                            {requestedVehicle?.vehicleNumber || del.assignedVehicleId}
+                          </span>
+                        </div>
+
+                        {requestedVehicle && (
+                          <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-600 pt-0.5">
+                            <div>
+                              <span className="text-slate-400 block">Truck Type:</span>
+                              <span className="font-bold text-slate-800">{requestedVehicle.vehicleType}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block">Payload Limit:</span>
+                              <span className="font-bold text-slate-800">{requestedVehicle.capacityKg.toLocaleString()} kg</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Cargo & Route details */}
+                      <div className="bg-slate-50 rounded-lg p-2.5 text-[10px] space-y-1.5 text-slate-700">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Consignment Weight:</span>
+                          <span className="font-bold text-slate-900">{del.goodsWeightKg.toLocaleString()} kg</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Route Waypoints:</span>
+                          <span className="font-bold text-slate-900 text-right">{del.pickupLocation} ➔ {del.destinationLocation}</span>
+                        </div>
+                        {del.costAssigned && (
+                          <div className="flex justify-between border-t border-slate-200 pt-1">
+                            <span className="text-slate-500">Offered Tariff / Cost:</span>
+                            <span className="font-mono font-bold text-emerald-700">₹{del.assignedCost?.toLocaleString('en-IN')}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions: Accept or Decline */}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          onClick={() => handleDeclineTruckRequest(del.id)}
+                          disabled={isDeclining || isAccepting}
+                          className="bg-white hover:bg-rose-50 text-rose-700 border border-rose-300 font-bold px-3 py-2 min-h-[40px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-xs inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        >
+                          {isDeclining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                          <span>Decline</span>
+                        </button>
+                        <button
+                          onClick={() => handleAcceptTruckRequest(del.id)}
+                          disabled={isAccepting || isDeclining}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 min-h-[40px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-xs inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        >
+                          {isAccepting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          <span>Accept Request</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
+
+          {/* ACTIVE / CONFIRMED CARRIER TRIPS */}
+          <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <div className="border-b border-slate-100 pb-2 flex justify-between items-center">
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display">
+                Carrier Trip Assigned Workspace ({activeTrips.length})
+              </h3>
+              <span className="text-[10px] text-slate-400 font-mono">TRACKING SYNC OK</span>
+            </div>
+
+            {activeTrips.length === 0 ? (
+              <div className="text-center py-12 text-slate-400 text-xs">
+                {pendingTruckRequests.length > 0
+                  ? 'You have pending booking requests above waiting for approval.'
+                  : 'No active deliveries are assigned to your carrier fleet yet. Manage bookings on admin workstation panel.'}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {activeTrips.map((del) => (
+                  <div key={del.id} className="border border-slate-200 rounded-xl p-4 space-y-3 shadow-sm hover:border-slate-300 transition-all">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-[10px] font-mono text-slate-400 block font-semibold">SHIPMENT ID: {del.id}</span>
+                        <h4 className="text-xs font-extrabold text-slate-800 mt-0.5">{del.goodsDescription}</h4>
+                      </div>
+                      <span className="font-mono text-[9px] font-extrabold bg-slate-900 text-white px-2 py-0.5 rounded border">
+                        {del.status}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-lg p-2.5 text-[10px] space-y-1 text-slate-600 font-medium">
+                      <div className="flex justify-between">
+                        <span>Assigned Vehicle:</span>
+                        <span className="font-bold text-slate-800 font-mono">
+                          {vehicles.find((v) => v.id === del.assignedVehicleId)?.vehicleNumber || del.assignedVehicleId || 'Asset Linked'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Consignment Weight:</span>
+                        <span className="font-bold text-slate-800">{del.goodsWeightKg} kg</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Route Waypoints:</span>
+                        <span className="font-bold text-slate-800">{del.pickupLocation} ➔ {del.destinationLocation}</span>
+                      </div>
+                      {del.costAssigned && (
+                        <div className="flex justify-between border-t border-slate-200 pt-1">
+                          <span>Freight Cost:</span>
+                          <span className="font-mono font-bold text-emerald-700">₹{del.assignedCost?.toLocaleString('en-IN')}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2">
+                      <span className="text-[9px] text-slate-400 font-mono">GPS tracking sync active</span>
+                      {['CONFIRMED', 'DISPATCHED', 'IN_TRANSIT'].includes(del.status) && (
+                        <button
+                          onClick={() => handleTripProgress(del.id, del.status)}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 min-h-[40px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-xs inline-flex items-center justify-center"
+                        >
+                          {del.status === 'CONFIRMED' ? 'Start Dispatch' : del.status === 'DISPATCHED' ? 'Mark In Transit' : 'Mark Delivered'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         )
       )}

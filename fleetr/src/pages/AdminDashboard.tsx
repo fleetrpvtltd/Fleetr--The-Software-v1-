@@ -320,6 +320,7 @@ export const AdminDashboard: React.FC = () => {
 
   const executeRecommendation = async (truckId: string, godownId: string) => {
     try {
+      const truck = vehicles.find((v) => v.id === truckId);
       await apiRequest(`/assignments/${selectedDelId}/assign-truck`, 'POST', {
         vehicleId: truckId,
         driverId: drivers[0]?.id || 'drv_1'
@@ -327,7 +328,7 @@ export const AdminDashboard: React.FC = () => {
       if (godownId) {
         await apiRequest(`/assignments/${selectedDelId}/assign-godown`, 'POST', { godownId });
       }
-      setSuccess(`Successfully completed smart assignment via FLEETR-MIND logic!`);
+      setSuccess(`Booking request dispatched to carrier for specific truck ${truck?.vehicleNumber || truckId}. Awaiting carrier acceptance.`);
       fetchData();
       setActiveWorkstation('MAIN');
     } catch (err: any) {
@@ -342,13 +343,15 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
     try {
+      const targetTruckId = overrideVehicleId || aiTrucks[0]?.vehicleId;
+      const truck = vehicles.find((v) => v.id === targetTruckId);
       await apiRequest(`/assignments/${selectedDelId}/override-ai`, 'POST', {
-        vehicleId: overrideVehicleId || aiTrucks[0]?.vehicleId,
+        vehicleId: targetTruckId,
         driverId: drivers[1]?.id || 'drv_2',
         godownId: overrideGodownId || aiGodowns[0]?.godownId,
         overrideReason
       });
-      setSuccess('AI intelligence override approved and logged in central audits.');
+      setSuccess(`Override request dispatched to carrier for truck ${truck?.vehicleNumber || targetTruckId}. Awaiting carrier acceptance.`);
       fetchData();
       setActiveWorkstation('MAIN');
     } catch (err: any) {
@@ -560,6 +563,16 @@ export const AdminDashboard: React.FC = () => {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-extrabold text-slate-900 font-mono">{del.id}</span>
                           <span className="text-[10px] text-slate-400">{del.goodsCategory} | {del.goodsWeightKg} kg</span>
+                          {del.truckAssignmentStatus === 'PENDING' && (
+                            <span className="font-mono text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-250 px-1.5 py-0.5 rounded">
+                              Awaiting Carrier ({vehicles.find((v) => v.id === del.assignedVehicleId)?.vehicleNumber || del.assignedVehicleId})
+                            </span>
+                          )}
+                          {del.truckAssignmentStatus === 'REJECTED' && (
+                            <span className="font-mono text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-250 px-1.5 py-0.5 rounded">
+                              Carrier Declined - Reassign
+                            </span>
+                          )}
                           {del.costAssigned ? (
                             <span className="font-mono text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
                               Cost: ₹{del.assignedCost?.toLocaleString('en-IN')}
@@ -665,9 +678,27 @@ export const AdminDashboard: React.FC = () => {
                       <span className="font-bold text-slate-700">{del.pickupLocation.split(',')[0]}</span> ➔ <span className="font-bold text-slate-750">{del.destinationLocation.split(',')[0]}</span>
                     </td>
                     <td className="px-4 py-3.5 text-center">
-                      <span className="font-mono text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-250">
-                        {del.status}
-                      </span>
+                      {del.truckAssignmentStatus === 'PENDING' ? (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="font-mono text-[9px] font-extrabold uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded border border-amber-300">
+                            Carrier Pending
+                          </span>
+                          <span className="text-[9px] font-mono text-slate-500 font-semibold">
+                            {vehicles.find((v) => v.id === del.assignedVehicleId)?.vehicleNumber || del.assignedVehicleId}
+                          </span>
+                        </div>
+                      ) : del.truckAssignmentStatus === 'REJECTED' ? (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="font-mono text-[9px] font-extrabold uppercase bg-rose-50 text-rose-700 px-2 py-0.5 rounded border border-rose-300">
+                            Carrier Declined
+                          </span>
+                          <span className="text-[9px] font-mono text-rose-500 font-semibold">Reassign needed</span>
+                        </div>
+                      ) : (
+                        <span className="font-mono text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-250">
+                          {del.status}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 text-right whitespace-nowrap">
                       {del.costAssigned ? (

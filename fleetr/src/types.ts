@@ -144,6 +144,7 @@ export interface Delivery {
   deliveredAt?: string;
   assignedVehicleId?: string;
   assignedDriverId?: string;
+  truckAssignmentStatus?: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   costAssigned?: boolean;
   assignedCost?: number;
   estimatedMileageKm?: number;
@@ -157,9 +158,11 @@ export interface Assignment {
   driverId?: string;
   godownId?: string;
   status?: string;
+  carrierId?: string;
   aiRecommended: boolean;
   overrideReason?: string;
   assignedAt: string;
+  carrierRespondedAt?: string;
 }
 
 export interface Payment {

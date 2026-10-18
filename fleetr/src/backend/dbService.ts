@@ -848,20 +848,22 @@ export class DbService {
         deliveryId,
         vehicleId,
         driverId,
+        carrierId: vehicle.ownerId,
         aiRecommended: false,
         assignedAt: new Date().toISOString(),
-        status: 'ACTIVE'
+        status: 'PENDING'
       };
 
       const updatedDelivery: Partial<Delivery> = {
-        status: 'TRUCK_ASSIGNED',
+        status: 'ADMIN_REVIEWED',
         assignedVehicleId: vehicleId,
-        assignedDriverId: driverId
+        assignedDriverId: driverId,
+        truckAssignmentStatus: 'PENDING'
       };
 
       const updatedVehicle: Partial<Vehicle> = {
         isAvailable: false,
-        status: 'IN_TRANSIT'
+        status: 'IDLE'
       };
 
       const assRef = doc(db, 'assignments', assignment.id);
@@ -872,6 +874,90 @@ export class DbService {
       return {
         delivery: { ...delivery, ...updatedDelivery },
         assignment
+      };
+    });
+  }
+
+  async carrierAcceptTruckTx(
+    deliveryId: string
+  ): Promise<{ delivery: Delivery; vehicle: Vehicle; assignment?: Assignment }> {
+    return await runTransaction(db, async (transaction) => {
+      const delRef = doc(db, 'deliveries', deliveryId);
+      const delSnap = await transaction.get(delRef);
+      if (!delSnap.exists()) {
+        throw new Error(`Consignment ${deliveryId} was not found.`);
+      }
+      const delivery = delSnap.data() as Delivery;
+      if (!delivery.assignedVehicleId) {
+        throw new Error(`Consignment ${deliveryId} has no assigned truck.`);
+      }
+
+      const vehRef = doc(db, 'vehicles', delivery.assignedVehicleId);
+      const vehSnap = await transaction.get(vehRef);
+      if (!vehSnap.exists()) {
+        throw new Error(`Vehicle ${delivery.assignedVehicleId} not found.`);
+      }
+      const vehicle = vehSnap.data() as Vehicle;
+
+      const updatedDelivery: Partial<Delivery> = {
+        status: 'TRUCK_ASSIGNED',
+        truckAssignmentStatus: 'ACCEPTED'
+      };
+
+      const updatedVehicle: Partial<Vehicle> = {
+        isAvailable: false,
+        status: 'IN_TRANSIT'
+      };
+
+      transaction.update(delRef, sanitizeForFirestore(updatedDelivery));
+      transaction.update(vehRef, sanitizeForFirestore(updatedVehicle));
+
+      return {
+        delivery: { ...delivery, ...updatedDelivery },
+        vehicle: { ...vehicle, ...updatedVehicle }
+      };
+    });
+  }
+
+  async carrierRejectTruckTx(
+    deliveryId: string
+  ): Promise<{ delivery: Delivery; vehicle: Vehicle }> {
+    return await runTransaction(db, async (transaction) => {
+      const delRef = doc(db, 'deliveries', deliveryId);
+      const delSnap = await transaction.get(delRef);
+      if (!delSnap.exists()) {
+        throw new Error(`Consignment ${deliveryId} was not found.`);
+      }
+      const delivery = delSnap.data() as Delivery;
+      if (!delivery.assignedVehicleId) {
+        throw new Error(`Consignment ${deliveryId} has no assigned truck.`);
+      }
+
+      const vehRef = doc(db, 'vehicles', delivery.assignedVehicleId);
+      const vehSnap = await transaction.get(vehRef);
+      if (!vehSnap.exists()) {
+        throw new Error(`Vehicle ${delivery.assignedVehicleId} not found.`);
+      }
+      const vehicle = vehSnap.data() as Vehicle;
+
+      const updatedDelivery: Partial<Delivery> = {
+        status: 'ADMIN_REVIEWED',
+        assignedVehicleId: '',
+        assignedDriverId: '',
+        truckAssignmentStatus: 'REJECTED'
+      };
+
+      const updatedVehicle: Partial<Vehicle> = {
+        isAvailable: true,
+        status: 'IDLE'
+      };
+
+      transaction.update(delRef, sanitizeForFirestore(updatedDelivery));
+      transaction.update(vehRef, sanitizeForFirestore(updatedVehicle));
+
+      return {
+        delivery: { ...delivery, ...updatedDelivery },
+        vehicle: { ...vehicle, ...updatedVehicle }
       };
     });
   }

@@ -1035,34 +1035,35 @@ apiRouter.post('/assignments/:deliveryId/assign-truck', checkRole(['ADMIN']), as
 
   try {
     const result = await dbService.assignDeliveryTruckTx(req.params.deliveryId, vehicleId, driverId);
-    await logAction(req, 'TRUCK_ASSIGN', `Assigned vehicle ${vehicleId} / driver ${driverId} to freight trip ${req.params.deliveryId}`);
+    await logAction(req, 'TRUCK_ASSIGN', `Requested vehicle ${vehicleId} / driver ${driverId} for consignment ${req.params.deliveryId}`);
+
+    const veh = await dbService.getVehicle(vehicleId);
+    const drv = await dbService.getDriver(driverId);
 
     if (result.delivery.customerId) {
-      const veh = await dbService.getVehicle(vehicleId);
-      const drv = await dbService.getDriver(driverId);
       await dbService.createNotification({
         id: `not_truck_assigned_cust_${Date.now()}`,
         userId: result.delivery.customerId,
         targetRole: 'BUSINESS_OWNER',
-        title: 'Carrier Asset Assigned',
-        message: `Truck ${veh?.vehicleNumber || vehicleId} and driver ${drv?.name || driverId} assigned to consignment ${result.delivery.id}.`,
+        title: 'Carrier Allocation Pending',
+        message: `Admin requested truck ${veh?.vehicleNumber || vehicleId} and driver ${drv?.name || driverId} for consignment ${result.delivery.id}. Awaiting carrier acceptance.`,
         type: 'INFO',
         read: false,
         createdAt: new Date().toISOString()
       });
+    }
 
-      if (veh?.ownerId && veh.ownerId !== result.delivery.customerId) {
-        await dbService.createNotification({
-          id: `not_truck_assigned_carrier_${Date.now()}`,
-          userId: veh.ownerId,
-          targetRole: 'TRUCK_OWNER',
-          title: 'New Trip Assigned',
-          message: `Your vehicle ${veh.vehicleNumber} has been assigned for consignment ${result.delivery.id} (${result.delivery.pickupLocation} ➔ ${result.delivery.destinationLocation}).`,
-          type: 'SUCCESS',
-          read: false,
-          createdAt: new Date().toISOString()
-        });
-      }
+    if (veh?.ownerId) {
+      await dbService.createNotification({
+        id: `not_truck_assigned_carrier_${Date.now()}`,
+        userId: veh.ownerId,
+        targetRole: 'TRUCK_OWNER',
+        title: 'Truck Booking Request Received',
+        message: `Admin requested your specific truck ${veh.vehicleNumber} for consignment ${result.delivery.id} (${result.delivery.pickupLocation} ➔ ${result.delivery.destinationLocation}, ${result.delivery.goodsWeightKg} kg). Please review and accept or decline.`,
+        type: 'WARNING',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
     }
 
     res.json({ success: true, delivery: result.delivery, assignment: result.assignment });
@@ -1118,28 +1119,108 @@ apiRouter.post('/assignments/:deliveryId/override-ai', checkRole(['ADMIN']), asy
   const del = await dbService.getDelivery(req.params.deliveryId);
   if (!del) return res.status(404).json({ error: 'NOT_FOUND' });
 
-  const updates: Partial<Delivery> = { status: 'TRUCK_ASSIGNED' };
-  if (vehicleId) updates.assignedVehicleId = vehicleId;
-  if (driverId) updates.assignedDriverId = driverId;
-  if (godownId) updates.intermediateGodownId = godownId;
+  try {
+    if (vehicleId) {
+      await dbService.assignDeliveryTruckTx(del.id, vehicleId, driverId || 'drv_1');
+      const veh = await dbService.getVehicle(vehicleId);
 
-  await dbService.updateDelivery(del.id, updates);
-  Object.assign(del, updates);
+      if (del.customerId) {
+        await dbService.createNotification({
+          id: `not_truck_override_cust_${Date.now()}`,
+          userId: del.customerId,
+          targetRole: 'BUSINESS_OWNER',
+          title: 'Carrier Allocation Pending',
+          message: `Admin requested truck ${veh?.vehicleNumber || vehicleId} for consignment ${del.id}. Awaiting carrier acceptance.`,
+          type: 'INFO',
+          read: false,
+          createdAt: new Date().toISOString()
+        });
+      }
 
-  const newAss: Assignment = {
-    id: `ass_${Date.now()}`,
-    deliveryId: del.id,
-    vehicleId,
-    driverId,
-    godownId,
-    aiRecommended: false,
-    overrideReason,
-    assignedAt: new Date().toISOString()
-  };
-  await dbService.createAssignment(newAss);
+      if (veh?.ownerId) {
+        await dbService.createNotification({
+          id: `not_truck_override_carrier_${Date.now()}`,
+          userId: veh.ownerId,
+          targetRole: 'TRUCK_OWNER',
+          title: 'Truck Booking Request Received',
+          message: `Admin requested your specific truck ${veh.vehicleNumber} for consignment ${del.id} (${del.pickupLocation} ➔ ${del.destinationLocation}, ${del.goodsWeightKg} kg). Please review and accept or decline.`,
+          type: 'WARNING',
+          read: false,
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
 
-  await logAction(req, 'AI_OVERRIDE', `Override dispatch routing optimization on ${del.id} with justification: "${overrideReason}"`);
-  res.json({ success: true, delivery: del });
+    if (godownId) {
+      await dbService.assignGodownCapacityTx(del.id, godownId);
+    }
+
+    await logAction(req, 'AI_OVERRIDE', `Override dispatch routing optimization on ${del.id} with justification: "${overrideReason}"`);
+    const updatedDel = await dbService.getDelivery(del.id);
+    res.json({ success: true, delivery: updatedDel });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'AI override failed.' });
+  }
+});
+
+apiRouter.post('/assignments/:deliveryId/carrier-accept', checkRole(['TRUCK_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
+  try {
+    const result = await dbService.carrierAcceptTruckTx(req.params.deliveryId);
+    await logAction(req, 'CARRIER_ACCEPT_TRUCK', `Carrier accepted truck request for delivery ${req.params.deliveryId}`);
+
+    // Notify Admin
+    await dbService.createNotification({
+      id: `not_carrier_accept_admin_${Date.now()}`,
+      userId: 'admin',
+      targetRole: 'ADMIN',
+      title: 'Truck Request Accepted',
+      message: `Carrier accepted booking request for vehicle ${result.vehicle.vehicleNumber} on consignment ${result.delivery.id}. Consignment status updated to TRUCK_ASSIGNED.`,
+      type: 'SUCCESS',
+      read: false,
+      createdAt: new Date().toISOString()
+    });
+
+    // Notify Business Owner
+    if (result.delivery.customerId) {
+      await dbService.createNotification({
+        id: `not_carrier_accept_cust_${Date.now()}`,
+        userId: result.delivery.customerId,
+        targetRole: 'BUSINESS_OWNER',
+        title: 'Truck Allocation Confirmed',
+        message: `Carrier has accepted the request for truck ${result.vehicle.vehicleNumber} on consignment ${result.delivery.id}.`,
+        type: 'SUCCESS',
+        read: false,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    res.json({ success: true, delivery: result.delivery, vehicle: result.vehicle });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to accept truck request.' });
+  }
+});
+
+apiRouter.post('/assignments/:deliveryId/carrier-reject', checkRole(['TRUCK_OWNER', 'ADMIN']), async (req: Request, res: Response) => {
+  try {
+    const result = await dbService.carrierRejectTruckTx(req.params.deliveryId);
+    await logAction(req, 'CARRIER_REJECT_TRUCK', `Carrier declined truck request for delivery ${req.params.deliveryId}`);
+
+    // Notify Admin
+    await dbService.createNotification({
+      id: `not_carrier_reject_admin_${Date.now()}`,
+      userId: 'admin',
+      targetRole: 'ADMIN',
+      title: 'Truck Request Declined',
+      message: `Carrier declined booking request for vehicle ${result.vehicle.vehicleNumber} on consignment ${result.delivery.id}. Consignment remains reviewed for re-routing.`,
+      type: 'WARNING',
+      read: false,
+      createdAt: new Date().toISOString()
+    });
+
+    res.json({ success: true, delivery: result.delivery, vehicle: result.vehicle });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to decline truck request.' });
+  }
 });
 
 // ---------------- PAYMENTS & WEBHOOKS ----------------
