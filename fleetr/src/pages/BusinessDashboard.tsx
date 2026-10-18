@@ -208,7 +208,7 @@ export const BusinessDashboard: React.FC = () => {
       });
 
       if (resp.delivery) {
-        setSuccessMsg(`Delivery Consignment ${resp.delivery.id} was created successfully! Checkout bill registered.`);
+        setSuccessMsg(`Delivery Consignment ${resp.delivery.id} registered successfully! Awaiting freight cost quotation from Admin.`);
         // Reset states
         setGoodsDescription('');
         setGoodsWeightKg('');
@@ -259,13 +259,13 @@ export const BusinessDashboard: React.FC = () => {
   // Pipeline summary totals
   const totalSpend = payments.filter((p) => p.status === 'CAPTURED').reduce((acc, curr) => acc + curr.totalAmount, 0);
   const activeOrders = deliveries.filter((d) => !['DELIVERED', 'CANCELLED', 'FAILED'].includes(d.status));
-  const pendingPayments = payments.filter((p) => p.status === 'PENDING');
+  const pendingPayments = payments.filter((p) => p.status === 'PENDING' && p.isCostAssigned !== false);
   const dispatchedList = deliveries.filter((d) => d.status === 'DISPATCHED' || d.status === 'IN_TRANSIT');
   const deliveredCount = deliveries.filter((d) => d.status === 'DELIVERED').length;
 
   // Chart dataset
   const chartData = deliveries.map((d) => {
-    const pay = payments.find((p) => p.deliveryId === d.id);
+    const pay = payments.find((p) => p.deliveryId === d.id && p.isCostAssigned !== false);
     return {
       id: d.id.substring(4, 9),
       weight: d.goodsWeightKg,
@@ -460,7 +460,7 @@ export const BusinessDashboard: React.FC = () => {
                   No active consignments registered. Get started by booking a new dispatch!
                 </div>
               ) : (
-                <table className="w-full text-xs text-left min-w-[700px]">
+                <table className="w-full text-xs text-left min-w-[760px]">
                   <thead className="bg-[#f8fafc] text-[#64748b] font-mono text-[10px] uppercase tracking-wider border-b border-slate-200">
                     <tr>
                       <th className="px-5 py-3">Consignment ID</th>
@@ -469,6 +469,7 @@ export const BusinessDashboard: React.FC = () => {
                       <th className="px-5 py-3">Weight (KG)</th>
                       <th className="px-5 py-3">Route Log</th>
                       <th className="px-5 py-3">Status Badge</th>
+                      <th className="px-5 py-3 text-right">Freight Cost</th>
                       <th className="px-5 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -499,6 +500,18 @@ export const BusinessDashboard: React.FC = () => {
                           <span className="font-mono text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200/50">
                             {del.status}
                           </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                          {del.costAssigned && del.assignedCost ? (
+                            <div>
+                              <span className="font-mono font-bold text-slate-900 block">₹{del.assignedCost.toLocaleString('en-IN')}</span>
+                              <span className="text-[9px] font-mono text-emerald-600 block">Assigned by Admin</span>
+                            </div>
+                          ) : (
+                            <span className="font-mono text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                              Pending Admin Quote
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-3.5 text-right whitespace-nowrap">
                           <button
@@ -730,7 +743,7 @@ export const BusinessDashboard: React.FC = () => {
                 {[
                   { statusKey: 'REQUESTED', label: 'Cargo Requested', desc: 'Consignment load metrics verified and registered for booking.' },
                   { statusKey: 'TRUCK_ASSIGNED', label: 'VAHAN Checked Carrier Assigned', desc: 'Secure fleet assets linked and compliance audit cleared.' },
-                  { statusKey: 'PAYMENT_PENDING', label: 'Rate Surcharges Invoiced', desc: 'Payment order billing computed. Pending checkout verification.' },
+                  { statusKey: 'PAYMENT_PENDING', label: 'Admin Cost Assigned & Invoiced', desc: 'Freight charges assigned by admin. Pending business owner checkout.' },
                   { statusKey: 'CONFIRMED', label: 'Dispatch Clearance Locked', desc: 'Razorpay billing captured. Carrier ready to depart.' },
                   { statusKey: 'DELIVERED', label: 'Job Terminated', desc: 'Consignment payload securely discharged at final destination.' }
                 ].map((item, idx) => {
@@ -755,67 +768,87 @@ export const BusinessDashboard: React.FC = () => {
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-5">
             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-widest font-display">Charges & Settlement Summary</h3>
             
-            {selectedDel.payment && (
-              <div className="bg-slate-50 p-4 border border-slate-200/50 rounded-xl text-xs space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-slate-400 font-medium">Base Freight Fee</span>
-                  <span className="font-semibold text-slate-800">₹{selectedDel.payment.baseFreight}</span>
+            {/* If cost is not yet assigned by Admin */}
+            {!selectedDel.delivery.costAssigned || !selectedDel.payment || selectedDel.payment.isCostAssigned === false ? (
+              <div className="bg-amber-50/80 border border-amber-200/80 p-4 rounded-xl text-xs space-y-3">
+                <div className="flex items-center gap-2 text-amber-800 font-bold">
+                  <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Cost Quote Pending Admin Assignment</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400 font-medium">Distance Mileage</span>
-                  <span className="font-semibold text-slate-800">{selectedDel.payment.distanceKm} km</span>
+                <p className="text-slate-600 text-[11px] leading-relaxed">
+                  The shipment cost for this consignment has not yet been assigned. Fleetr Admin is currently assessing your consignment specifications ({selectedDel.delivery.goodsWeightKg} kg, {selectedDel.delivery.goodsCategory}) and route mileage.
+                </p>
+                <div className="bg-white/80 p-2.5 rounded-lg border border-amber-200 text-[10px] font-mono text-slate-600 flex justify-between items-center">
+                  <span>Billing Status</span>
+                  <span className="font-bold text-amber-700 uppercase">Awaiting Admin Quotation</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400 font-medium">FASTAG Surcharge Settle</span>
-                  <span className="font-semibold text-slate-800">₹{selectedDel.payment.tollSurcharge}</span>
-                </div>
-                <div className="flex justify-between border-t border-slate-200/50 pt-2.5 font-bold text-slate-800">
-                  <span>Gross Surcharge (inc 18% GST)</span>
-                  <span>₹{selectedDel.payment.totalAmount}</span>
-                </div>
+                <p className="text-[10px] text-slate-400">
+                  Once the admin assigns the freight charges in the admin platform, the detailed fee breakdown and gateway payment checkout will appear here automatically.
+                </p>
               </div>
-            )}
-
-            {/* Check/checkout buttons */}
-            {selectedDel.payment && selectedDel.payment.status === 'PENDING' && (
-              <div className="space-y-4">
-                <div className="border border-amber-100 bg-amber-50 p-3 rounded-lg text-xs leading-relaxed text-amber-800 space-y-2">
-                  <label className="flex gap-2 items-start cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={payDisclaimerAccepted}
-                      onChange={(e) => setPayDisclaimerAccepted(e.target.checked)}
-                      className="mt-0.5 accent-amber-600"
-                    />
-                    <span className="text-[10px] font-medium select-none">
-                      I acknowledge that this logistics dispatch is non-refundable upon clearance locking.
-                    </span>
-                  </label>
+            ) : (
+              <>
+                <div className="bg-slate-50 p-4 border border-slate-200/50 rounded-xl text-xs space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 font-medium">Base Freight Fee</span>
+                    <span className="font-semibold text-slate-800">₹{selectedDel.payment.baseFreight}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 font-medium">Distance Mileage</span>
+                    <span className="font-semibold text-slate-800">{selectedDel.payment.distanceKm} km</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400 font-medium">FASTAG Surcharge Settle</span>
+                    <span className="font-semibold text-slate-800">₹{selectedDel.payment.tollSurcharge}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-200/50 pt-2.5 font-bold text-slate-800">
+                    <span>Gross Surcharge (inc 18% GST)</span>
+                    <span className="text-slate-900">₹{selectedDel.payment.totalAmount}</span>
+                  </div>
                 </div>
-                <button
-                  onClick={() => handleCheckout(selectedDel.payment.id, selectedDel.delivery.id)}
-                  className="w-full bg-slate-950 hover:bg-slate-800 text-white font-bold py-3 min-h-[44px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer inline-flex items-center justify-center shadow-xs"
-                >
-                  Pay ₹{selectedDel.payment.totalAmount} via Secure Gateway (Capture & Confirm)
-                </button>
-              </div>
-            )}
 
-            {selectedDel.payment && selectedDel.payment.status === 'CAPTURED' && (
-              <div className="space-y-4">
-                <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-center font-semibold text-emerald-800 text-xs">
-                  Settle Gateway: Captured & Verified
-                </div>
-                {selectedDel.invoice && (
-                  <a
-                    href={`/api/invoices/${selectedDel.invoice.id}/download`}
-                    download
-                    className="w-full text-center flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-3 min-h-[44px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
-                  >
-                    <FileText className="w-4 h-4 text-slate-600" /> Download LR Invoice Bill
-                  </a>
+                {/* Check/checkout buttons */}
+                {selectedDel.payment.status === 'PENDING' && (
+                  <div className="space-y-4">
+                    <div className="border border-amber-100 bg-amber-50 p-3 rounded-lg text-xs leading-relaxed text-amber-800 space-y-2">
+                      <label className="flex gap-2 items-start cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={payDisclaimerAccepted}
+                          onChange={(e) => setPayDisclaimerAccepted(e.target.checked)}
+                          className="mt-0.5 accent-amber-600"
+                        />
+                        <span className="text-[10px] font-medium select-none">
+                          I acknowledge that this logistics dispatch is non-refundable upon clearance locking.
+                        </span>
+                      </label>
+                    </div>
+                    <button
+                      onClick={() => handleCheckout(selectedDel.payment.id, selectedDel.delivery.id)}
+                      className="w-full bg-slate-950 hover:bg-slate-800 text-white font-bold py-3 min-h-[44px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer inline-flex items-center justify-center shadow-xs"
+                    >
+                      Pay ₹{selectedDel.payment.totalAmount} via Secure Gateway (Capture & Confirm)
+                    </button>
+                  </div>
                 )}
-              </div>
+
+                {selectedDel.payment.status === 'CAPTURED' && (
+                  <div className="space-y-4">
+                    <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-center font-semibold text-emerald-800 text-xs">
+                      Settle Gateway: Captured & Verified
+                    </div>
+                    {selectedDel.invoice && (
+                      <a
+                        href={`/api/invoices/${selectedDel.invoice.id}/download`}
+                        download
+                        className="w-full text-center flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-3 min-h-[44px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
+                      >
+                        <FileText className="w-4 h-4 text-slate-600" /> Download LR Invoice Bill
+                      </a>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

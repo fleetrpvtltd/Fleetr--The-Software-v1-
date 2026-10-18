@@ -731,6 +731,9 @@ apiRouter.get('/deliveries/:id', async (req: Request, res: Response) => {
   const del = await dbService.getDelivery(req.params.id);
   if (!del) return res.status(404).json({ error: 'NOT_FOUND' });
 
+  const user = await getCurrentUser(req);
+  const isAdmin = user?.role === 'ADMIN';
+
   const [vehicle, driver, godown, payment, invoice] = await Promise.all([
     del.assignedVehicleId ? dbService.getVehicle(del.assignedVehicleId) : Promise.resolve(null),
     del.assignedDriverId ? dbService.getDriver(del.assignedDriverId) : Promise.resolve(null),
@@ -739,12 +742,15 @@ apiRouter.get('/deliveries/:id', async (req: Request, res: Response) => {
     dbService.getInvoiceByDeliveryId(del.id)
   ]);
 
+  // Cost must be assigned by Admin before payment is exposed to the business owner
+  const exposedPayment = (del.costAssigned || isAdmin) ? payment : null;
+
   res.json({
     delivery: del,
     assignedVehicle: vehicle,
     assignedDriver: driver,
     assignedGodown: godown,
-    payment,
+    payment: exposedPayment,
     invoice
   });
 });
@@ -801,30 +807,19 @@ apiRouter.post('/deliveries', checkRole(['BUSINESS_OWNER', 'ADMIN']), async (req
     consigneeGstin: consigneeGstin || '07BBBBB0000B2Z0',
     status: 'REQUESTED',
     createdAt: new Date().toISOString(),
-    intermediateGodownId
-  };
-
-  const newPayment: Payment = {
-    id: `pay_${Date.now()}`,
-    deliveryId: newDel.id,
-    baseFreight: tariff.baseFreight,
-    distanceKm: tariff.distanceKm,
-    tollSurcharge: tariff.tollSurcharge,
-    gstRate: tariff.gstRate,
-    tdsRate: tariff.tdsRate,
-    totalAmount: tariff.totalAmount,
-    status: 'PENDING',
-    gatewayOrderId: `gateway_ord_${Date.now()}`
+    intermediateGodownId,
+    costAssigned: false,
+    estimatedMileageKm: tariff.distanceKm,
+    estimatedStandardTariff: tariff.totalAmount
   };
 
   await dbService.createDelivery(newDel);
-  await dbService.createPayment(newPayment);
 
   const newNot: Notification = {
     id: `not_${Date.now()}`,
     userId: customerId,
     title: 'Consignment Created',
-    message: `Delivery consignment ${newDel.id} registered with route ${tariff.distanceKm} km. E-way bill ${newDel.ewayBillNo} verified.`,
+    message: `Delivery consignment ${newDel.id} registered (${tariff.distanceKm} km). E-way bill ${newDel.ewayBillNo} verified. Shipment freight cost is pending review and quotation by Admin.`,
     targetRole: 'BUSINESS_OWNER',
     type: 'SUCCESS',
     read: false,
@@ -836,15 +831,15 @@ apiRouter.post('/deliveries', checkRole(['BUSINESS_OWNER', 'ADMIN']), async (req
     id: `not_admin_${Date.now()}`,
     userId: 'usr_admin',
     targetRole: 'ADMIN',
-    title: 'New Freight Booking',
-    message: `Consignment ${newDel.id} queued: ${pickupLocation} to ${destinationLocation} (${tariff.distanceKm} km).`,
+    title: 'New Freight Booking - Cost Quote Needed',
+    message: `Consignment ${newDel.id} queued: ${pickupLocation} to ${destinationLocation} (${tariff.distanceKm} km, ${weightNum} kg). Please assign shipment cost in Admin Panel.`,
     type: 'WARNING',
     read: false,
     createdAt: new Date().toISOString()
   });
 
-  await logAction(req, 'DELIVERY_CREATE', `Created transport order request: ${newDel.id} (${tariff.distanceKm} km, ₹${tariff.totalAmount})`);
-  res.status(201).json({ success: true, delivery: newDel, payment: newPayment });
+  await logAction(req, 'DELIVERY_CREATE', `Created transport order request: ${newDel.id} (${tariff.distanceKm} km). Cost pending Admin assignment.`);
+  res.status(201).json({ success: true, delivery: newDel, payment: null });
 });
 
 apiRouter.patch('/deliveries/:id/status', async (req: Request, res: Response) => {
@@ -929,9 +924,80 @@ apiRouter.patch('/deliveries/:id/status', async (req: Request, res: Response) =>
   res.json({ success: true, delivery: del });
 });
 
+apiRouter.post('/deliveries/:id/assign-cost', checkRole(['ADMIN']), async (req: Request, res: Response) => {
+  const del = await dbService.getDelivery(req.params.id);
+  if (!del) return res.status(404).json({ error: 'NOT_FOUND', message: 'Delivery consignment not found.' });
+
+  const { totalAmount, baseFreight, tollSurcharge, gstRate } = req.body;
+  const total = Number(totalAmount);
+  if (!total || isNaN(total) || total <= 0) {
+    return res.status(400).json({ error: 'INVALID_AMOUNT', message: 'Valid positive total amount is required.' });
+  }
+
+  const base = Number(baseFreight) || Math.round(total / 1.18);
+  const toll = Number(tollSurcharge) || 0;
+  const gst = Number(gstRate) || 18;
+
+  let payment = await dbService.getPaymentByDeliveryId(del.id);
+  if (payment) {
+    await dbService.updatePayment(payment.id, {
+      baseFreight: base,
+      tollSurcharge: toll,
+      gstRate: gst,
+      totalAmount: total,
+      isCostAssigned: true
+    });
+    payment = { ...payment, baseFreight: base, tollSurcharge: toll, gstRate: gst, totalAmount: total, isCostAssigned: true };
+  } else {
+    payment = {
+      id: `pay_${Date.now()}`,
+      deliveryId: del.id,
+      baseFreight: base,
+      distanceKm: del.estimatedMileageKm || 0,
+      tollSurcharge: toll,
+      gstRate: gst,
+      tdsRate: 2,
+      totalAmount: total,
+      status: 'PENDING',
+      isCostAssigned: true,
+      gatewayOrderId: `gateway_ord_${Date.now()}`
+    };
+    await dbService.createPayment(payment);
+  }
+
+  await dbService.updateDelivery(del.id, {
+    costAssigned: true,
+    assignedCost: total
+  });
+  del.costAssigned = true;
+  del.assignedCost = total;
+
+  // Send notification to the Business Owner
+  await dbService.createNotification({
+    id: `not_cost_assigned_${Date.now()}`,
+    userId: del.customerId,
+    targetRole: 'BUSINESS_OWNER',
+    title: 'Shipment Cost Assigned',
+    message: `Admin has assigned freight charges of ₹${total.toLocaleString('en-IN')} for consignment ${del.id} (${del.goodsDescription}). You can now review charges and proceed with checkout in your dashboard.`,
+    type: 'INFO',
+    read: false,
+    createdAt: new Date().toISOString()
+  });
+
+  await logAction(req, 'ASSIGN_COST', `Admin assigned freight cost ₹${total} to consignment ${del.id}`);
+  res.json({ success: true, delivery: del, payment });
+});
+
 apiRouter.post('/deliveries/:id/request-payment', checkRole(['ADMIN']), async (req: Request, res: Response) => {
   const del = await dbService.getDelivery(req.params.id);
   if (!del) return res.status(404).json({ error: 'NOT_FOUND' });
+
+  if (!del.costAssigned) {
+    return res.status(400).json({
+      error: 'COST_NOT_ASSIGNED',
+      message: 'Shipment cost must be assigned by Admin before requesting payment from the business owner.'
+    });
+  }
 
   await dbService.updateDelivery(del.id, { status: 'PAYMENT_PENDING' });
   del.status = 'PAYMENT_PENDING';
@@ -1157,9 +1223,10 @@ apiRouter.get('/payments', checkRole(['BUSINESS_OWNER', 'TRUCK_OWNER', 'ADMIN'])
     return res.json({ payments });
   }
   const myDels = await dbService.getDeliveries({ customerId: user.id });
-  const myDelIds = myDels.deliveries.map((d) => d.id);
-  const payments = await dbService.getPayments(myDelIds);
-  res.json({ payments });
+  const assignedDelIds = myDels.deliveries.filter((d) => d.costAssigned !== false).map((d) => d.id);
+  const payments = await dbService.getPayments(assignedDelIds);
+  const activePayments = payments.filter((p) => p.isCostAssigned !== false);
+  res.json({ payments: activePayments });
 });
 
 // ---------------- INVOICES ----------------

@@ -45,7 +45,8 @@ import {
   Send,
   Clock,
   ThumbsUp,
-  CheckCircle2
+  CheckCircle2,
+  IndianRupee
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -58,6 +59,15 @@ export const AdminDashboard: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyAlert[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Cost Assignment Workstation State
+  const [costModalOpen, setCostModalOpen] = useState(false);
+  const [targetDelForCost, setTargetDelForCost] = useState<Delivery | null>(null);
+  const [assignedBaseFreight, setAssignedBaseFreight] = useState<string>('');
+  const [assignedToll, setAssignedToll] = useState<string>('0');
+  const [assignedGst, setAssignedGst] = useState<string>('18');
+  const [assignedTotalCost, setAssignedTotalCost] = useState<string>('');
+  const [assigningCost, setAssigningCost] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
@@ -195,7 +205,84 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleBaseFreightChange = (val: string) => {
+    setAssignedBaseFreight(val);
+    const base = Number(val) || 0;
+    const toll = Number(assignedToll) || 0;
+    const gst = Number(assignedGst) || 18;
+    const subtotal = base + toll;
+    const total = Math.round(subtotal * (1 + gst / 100));
+    setAssignedTotalCost(String(total));
+  };
+
+  const handleTotalCostChange = (val: string) => {
+    setAssignedTotalCost(val);
+    const total = Number(val) || 0;
+    const toll = Number(assignedToll) || 0;
+    const gst = Number(assignedGst) || 18;
+    const subtotal = total / (1 + gst / 100);
+    const base = Math.max(0, Math.round(subtotal - toll));
+    setAssignedBaseFreight(String(base));
+  };
+
+  const openAssignCostModal = (del: Delivery) => {
+    setTargetDelForCost(del);
+    const existingPay = payments.find((p) => p.deliveryId === del.id);
+    if (existingPay && existingPay.totalAmount) {
+      setAssignedBaseFreight(String(existingPay.baseFreight || Math.round(existingPay.totalAmount / 1.18)));
+      setAssignedToll(String(existingPay.tollSurcharge || 0));
+      setAssignedGst(String(existingPay.gstRate || 18));
+      setAssignedTotalCost(String(existingPay.totalAmount));
+    } else if (del.assignedCost) {
+      setAssignedBaseFreight(String(Math.round(del.assignedCost / 1.18)));
+      setAssignedToll('0');
+      setAssignedGst('18');
+      setAssignedTotalCost(String(del.assignedCost));
+    } else {
+      const benchmark = del.estimatedStandardTariff || 0;
+      setAssignedBaseFreight(benchmark ? String(Math.round(benchmark / 1.18)) : '');
+      setAssignedToll('0');
+      setAssignedGst('18');
+      setAssignedTotalCost(benchmark ? String(benchmark) : '');
+    }
+    setCostModalOpen(true);
+  };
+
+  const submitAssignCost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetDelForCost) return;
+    const total = Number(assignedTotalCost);
+    if (!total || isNaN(total) || total <= 0) {
+      setError('Please provide a valid positive total cost amount.');
+      return;
+    }
+    setAssigningCost(true);
+    try {
+      const resp = await apiRequest(`/deliveries/${targetDelForCost.id}/assign-cost`, 'POST', {
+        totalAmount: total,
+        baseFreight: Number(assignedBaseFreight) || Math.round(total / 1.18),
+        tollSurcharge: Number(assignedToll) || 0,
+        gstRate: Number(assignedGst) || 18
+      });
+      if (resp.success) {
+        setSuccess(`Freight cost of ₹${total.toLocaleString('en-IN')} assigned to consignment ${targetDelForCost.id}. Business owner can now view and pay.`);
+        setCostModalOpen(false);
+        fetchData();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to assign shipment cost');
+    } finally {
+      setAssigningCost(false);
+    }
+  };
+
   const triggerPaymentRequest = async (deliveryId: string) => {
+    const del = deliveries.find((d) => d.id === deliveryId);
+    if (del && !del.costAssigned) {
+      openAssignCostModal(del);
+      setError('Please assign the shipment cost before requesting payment from the business owner.');
+      return;
+    }
     try {
       await apiRequest(`/deliveries/${deliveryId}/request-payment`, 'POST');
       setSuccess(`Invoiced billing successfully generated for order: ${deliveryId}`);
@@ -470,14 +557,31 @@ export const AdminDashboard: React.FC = () => {
                   deliveries.filter((d) => d.status === 'REQUESTED' || d.status === 'ADMIN_REVIEWED').map((del) => (
                     <div key={del.id} className="border border-slate-100 p-3 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs hover:bg-slate-50 transition-colors">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-extrabold text-slate-900 font-mono">{del.id}</span>
                           <span className="text-[10px] text-slate-400">{del.goodsCategory} | {del.goodsWeightKg} kg</span>
+                          {del.costAssigned ? (
+                            <span className="font-mono text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                              Cost: ₹{del.assignedCost?.toLocaleString('en-IN')}
+                            </span>
+                          ) : (
+                            <span className="font-mono text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                              Cost: Pending Quote
+                            </span>
+                          )}
                         </div>
                         <span className="font-bold text-slate-800 block mt-1">{del.goodsDescription}</span>
                         <span className="text-[10px] text-slate-500 block mt-0.5">Route: {del.pickupLocation} ➔ {del.destinationLocation}</span>
                       </div>
                       <div className="flex gap-2 text-xs font-semibold justify-end flex-wrap sm:flex-nowrap">
+                        <button
+                          onClick={() => openAssignCostModal(del)}
+                          className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-2 min-h-[38px] rounded-lg text-xs transition-all active:scale-95 cursor-pointer inline-flex items-center gap-1 shadow-xs"
+                          title="Assign or edit freight cost"
+                        >
+                          <IndianRupee className="w-3.5 h-3.5" />
+                          <span>{del.costAssigned ? 'Edit Cost' : 'Assign Cost'}</span>
+                        </button>
                         <button
                           onClick={() => handleStatusTransition(del.id, 'ADMIN_REVIEWED')}
                           className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3.5 py-2 min-h-[38px] rounded-lg transition-all active:scale-95 cursor-pointer inline-flex items-center justify-center shadow-xs"
@@ -538,13 +642,14 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           <div className="w-full overflow-x-auto -mx-3.5 sm:mx-0 px-3.5 sm:px-0">
-            <table className="w-full text-xs text-left min-w-[660px]">
+            <table className="w-full text-xs text-left min-w-[720px]">
               <thead className="bg-[#f8fafc] text-[#64748b] uppercase tracking-wider font-semibold border-b border-slate-200">
                 <tr>
                   <th className="px-4 py-3">Order ID</th>
                   <th className="px-4 py-3">Consignment details</th>
                   <th className="px-4 py-3">Locations Route</th>
                   <th className="px-4 py-3 text-center">Status state</th>
+                  <th className="px-4 py-3 text-right">Freight Cost</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -564,7 +669,27 @@ export const AdminDashboard: React.FC = () => {
                         {del.status}
                       </span>
                     </td>
+                    <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                      {del.costAssigned ? (
+                        <div>
+                          <span className="font-mono font-bold text-slate-900 block">₹{del.assignedCost?.toLocaleString('en-IN')}</span>
+                          <span className="text-[9px] font-mono text-emerald-600 block">Assigned by Admin</span>
+                        </div>
+                      ) : (
+                        <span className="font-mono text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                          Quote Pending
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3.5 text-right space-x-1.5 align-middle whitespace-nowrap">
+                      <button
+                        onClick={() => openAssignCostModal(del)}
+                        className="bg-amber-500 hover:bg-amber-600 text-white font-bold px-2.5 py-1.5 min-h-[38px] rounded-lg text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer inline-flex items-center gap-1 shadow-xs"
+                        title="Assign or edit freight cost"
+                      >
+                        <IndianRupee className="w-3.5 h-3.5" />
+                        <span>{del.costAssigned ? 'Edit Cost' : 'Assign Cost'}</span>
+                      </button>
                       {del.status === 'ADMIN_REVIEWED' && (
                         <button
                           onClick={() => openAIWorkstation(del.id)}
@@ -1555,6 +1680,137 @@ export const AdminDashboard: React.FC = () => {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* COST ASSIGNMENT MODAL (ADMIN SEPARATE COST SPECIFICATION) */}
+      {costModalOpen && targetDelForCost && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+                  <IndianRupee className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 font-display">Assign Shipment Cost</h3>
+                  <p className="text-[10px] text-slate-400 font-mono">Consignment ID: {targetDelForCost.id}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCostModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <XSquare className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Consignment summary context */}
+            <div className="bg-slate-50 border border-slate-200/70 rounded-xl p-3.5 text-xs space-y-2">
+              <div className="flex justify-between items-start">
+                <span className="font-bold text-slate-800">{targetDelForCost.goodsDescription}</span>
+                <span className="text-[10px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  {targetDelForCost.goodsWeightKg} kg | {targetDelForCost.goodsCategory}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-600">
+                <span className="font-semibold text-slate-700">Route:</span> {targetDelForCost.pickupLocation} ➔ {targetDelForCost.destinationLocation}
+              </div>
+              {targetDelForCost.estimatedMileageKm && (
+                <div className="flex justify-between text-[10px] font-mono pt-1.5 border-t border-slate-200/60 text-slate-500">
+                  <span>Estimated Mileage: <strong>{targetDelForCost.estimatedMileageKm} km</strong></span>
+                  {targetDelForCost.estimatedStandardTariff && (
+                    <span>Benchmark Estimate: <strong>₹{targetDelForCost.estimatedStandardTariff.toLocaleString('en-IN')}</strong></span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={submitAssignCost} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Base Freight (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={assignedBaseFreight}
+                    onChange={(e) => handleBaseFreightChange(e.target.value)}
+                    placeholder="e.g. 15000"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Toll / Surcharge (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={assignedToll}
+                    onChange={(e) => {
+                      setAssignedToll(e.target.value);
+                      const base = Number(assignedBaseFreight) || 0;
+                      const toll = Number(e.target.value) || 0;
+                      const gst = Number(assignedGst) || 18;
+                      setAssignedTotalCost(String(Math.round((base + toll) * (1 + gst / 100))));
+                    }}
+                    placeholder="0"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Total Bill Amount to Business Owner (₹ inc GST) *</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 font-bold text-sm">
+                    ₹
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    step="any"
+                    required
+                    value={assignedTotalCost}
+                    onChange={(e) => handleTotalCostChange(e.target.value)}
+                    placeholder="e.g. 18500"
+                    className="w-full bg-white border-2 border-amber-300 rounded-lg pl-8 pr-3 py-2.5 text-sm font-bold text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  This cost will be assigned and displayed in the Business Owner's dashboard for payment settlement.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={assigningCost}
+                  onClick={() => setCostModalOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={assigningCost}
+                  className="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 active:scale-95"
+                >
+                  {assigningCost ? (
+                    <>
+                      <RefreshCcw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Cost Quote...</span>
+                    </>
+                  ) : (
+                    <>
+                      <IndianRupee className="w-3.5 h-3.5" />
+                      <span>Confirm & Assign Cost</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

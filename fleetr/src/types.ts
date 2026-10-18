@@ -144,6 +144,10 @@ export interface Delivery {
   deliveredAt?: string;
   assignedVehicleId?: string;
   assignedDriverId?: string;
+  costAssigned?: boolean;
+  assignedCost?: number;
+  estimatedMileageKm?: number;
+  estimatedStandardTariff?: number;
 }
 
 export interface Assignment {
@@ -168,6 +172,7 @@ export interface Payment {
   tdsRate: number; // percentage, e.g. 2
   totalAmount: number;
   status: 'PENDING' | 'CAPTURED' | 'FAILED';
+  isCostAssigned?: boolean;
   gatewayOrderId?: string;
   gatewayPaymentId?: string;
   paidAt?: string;
